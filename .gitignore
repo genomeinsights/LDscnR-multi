@@ -1,0 +1,17 @@
+## Per-dataset regenerable/heavy state -- never committed, rebuilt from input/
+## by build_stage1()/run_stage_A()/run_stage_B() (see R/00_config.R's receipt
+## machinery for what "regenerable" means here).
+**/cache/
+**/output/
+summary.csv
+
+## Real GT panels are large and, per this project's established convention
+## (LDscnR-paper/module_3sp/data/README.md), raw data is not committed --
+## only a provenance record. examples/ is the one exception: its inputs are
+## small per-chromosome subsets checked in on purpose so the pipeline can be
+## verified end-to-end without external data. Do not add a blanket input/
+## ignore rule that would also hide those.
+
+.Rhistory
+.RData
+.Rproj.user/
