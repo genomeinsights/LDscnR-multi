@@ -33,7 +33,11 @@ DEFAULTS <- list(
   b_unit               = 1000L,                 # permutations for the "unit" arm (cheap)
   b_simes              = 200L,                  # permutations for the "simes" arm (rescans every marker)
   ## Stage B: outlier test / permutation null / region rotation
-  size_floor           = 8L,
+  ## size_floor: NULL means "derive from this dataset's own marker count" --
+  ## see resolve_config()'s DERIVED SIZE_FLOOR section below. Set to a number
+  ## in DEFAULTS or a dataset's input/config.R to pin it instead.
+  size_floor           = NULL,
+  size_floor_per_markers = 1e5,   # 1 unit of floor per this many assayed markers
   alpha                = 0.05,
   assembly              = "stage2_discovered",  # or "physical"
   score_threshold       = 0.80,
@@ -47,19 +51,24 @@ DEFAULTS <- list(
 )
 
 ## ---- 2. LDscnR VERSION PIN ---------------------------------------------------
-## Same reasoning as module_3sp/R/00_config.R: `packageVersion("LDscnR")` never
-## changes across commits of a 0.0.0.9000 package, so the only check that
-## actually catches a stale install is a content hash over R/*.R at the commit
-## this repo was validated against. A batch of hundreds of datasets is exactly
-## where a silent stale install would be most expensive to discover late.
+## A content hash over R/*.R at the commit this repo was validated against,
+## not the package Version string alone: LDscnR is now versioned (0.9.0, was
+## 0.0.0.9000), but a version bump is not guaranteed for every commit, so the
+## hash remains the check that actually catches a stale install. A batch of
+## hundreds of datasets is exactly where that would be most expensive to
+## discover late. LDscnR-multi's own repo shares this working tree with other,
+## sometimes-concurrent sessions (module_manuscript_rho05, vignette
+## reorganisation) -- confirm any diff since the last pin is documentation/
+## non-functional (or deliberately intended) before moving this pin, not just
+## that check_ldscnr() currently passes.
 LDSCNR_PIN <- list(
   repo    = path.expand("~/gitlab/LDscnR"),
   ## outlier-scan (the branch this was first pinned to) was fast-forwarded
   ## into main and development has continued there since -- outlier-scan
   ## itself is now a stale ancestor, not a separate line.
   branch  = "main",
-  sha     = "2993ea80e6c8",
-  src_sha = "dc89dbdc504fb660"
+  sha     = "2fc1d44a2552",
+  src_sha = "3060402d53eecdb2"
 )
 
 check_ldscnr <- function(stop_on_fail = !nzchar(Sys.getenv("LDSCNR_LAX"))) {
@@ -119,8 +128,10 @@ write_receipt <- function(stage_dir, inputs = character(), params = list(), outp
   invisible(TRUE)
 }
 
-## TRUE when the stage must (re)run: no receipt, a changed parameter, or a
-## changed input. Reports why, so a rerun a user didn't expect is explainable.
+## TRUE when the stage must (re)run: no receipt, a changed parameter, a
+## changed input, a missing recorded output, or LDscnR's own source having
+## moved since the receipt was written. Reports why, so a rerun a user didn't
+## expect is explainable.
 stage_stale <- function(stage_dir, inputs = character(), params = list(), label = basename(stage_dir)) {
   rp <- receipt_path(stage_dir)
   if (!file.exists(rp)) { message("    [", label, "] no receipt -- will run"); return(TRUE) }
@@ -133,6 +144,30 @@ stage_stale <- function(stage_dir, inputs = character(), params = list(), label 
   if (length(ch)) {
     message("    [", label, "] inputs changed: ", paste(basename(ch), collapse = ", "), " -- will run")
     return(TRUE)
+  }
+  ## A receipt claiming "up to date" is worthless if what it promises exists
+  ## no longer does -- e.g. an output manually deleted, or a stage that wrote
+  ## fewer optional outputs on its last run than an earlier receipt recorded.
+  missing_out <- r$outputs[nzchar(r$outputs) & !file.exists(r$outputs)]
+  if (length(missing_out)) {
+    message("    [", label, "] recorded output(s) missing: ",
+           paste(basename(missing_out), collapse = ", "), " -- will run")
+    return(TRUE)
+  }
+  ## The receipt recorded which LDscnR source built this result; if that
+  ## source has since moved (a real code change, not just a version bump the
+  ## package may never make -- see LDSCNR_PIN's own header), the result is
+  ## not provably reproducible from the CURRENT package regardless of how
+  ## unchanged this stage's own inputs/params are. Recorded, not merely
+  ## checked at call time, so this survives being read back by a later run.
+  old_src <- tryCatch(r$ldscnr$src_sha, error = function(e) NA_character_)
+  if (!is.null(old_src) && !is.na(old_src)) {
+    cur <- tryCatch(check_ldscnr(stop_on_fail = FALSE), error = function(e) NULL)
+    if (!is.null(cur) && !is.na(cur$src_sha) && !identical(cur$src_sha, old_src)) {
+      message("    [", label, "] LDscnR source changed since this receipt (",
+             old_src, " -> ", cur$src_sha, ") -- will run")
+      return(TRUE)
+    }
   }
   message("    [", label, "] up to date (", format(r$when, "%Y-%m-%d %H:%M"), ")")
   FALSE
@@ -148,7 +183,14 @@ resolve_config <- function(dataset_dir) {
   cfg <- DEFAULTS
   cfg_file <- file.path(dataset_dir, "input", "config.R")
   if (file.exists(cfg_file)) {
-    env <- new.env(parent = emptyenv())
+    ## parent = baseenv(), NOT emptyenv(): a config.R sourced into an
+    ## environment with no path at all to base R cannot resolve `<-` itself
+    ## (verified directly: even `x <- 5` throws "could not find function
+    ## '<-'") -- every dataset override was silently failing to execute.
+    ## baseenv() gives base functions (assignment, arithmetic, c(), list())
+    ## without inheriting from globalenv() or attached packages, keeping the
+    ## override sandboxed but actually able to run.
+    env <- new.env(parent = baseenv())
     sys.source(cfg_file, envir = env)
     override <- as.list(env)
     unknown <- setdiff(names(override), names(DEFAULTS))
@@ -156,6 +198,26 @@ resolve_config <- function(dataset_dir) {
       "%s assigns %d name(s) not in DEFAULTS (typo?): %s",
       cfg_file, length(unknown), paste(unknown, collapse = ", ")))
     cfg[names(override)] <- override
+  }
+
+  ## ---- DERIVED SIZE_FLOOR ------------------------------------------------
+  ## 1 unit of floor per size_floor_per_markers assayed markers (default
+  ## 1e5): module_3sp's own SIZE_FLOOR = 8, hand-derived as "2x its median
+  ## stage-1 cluster size", was fitted to that panel's ~790,578 markers --
+  ## 790578 / 1e5 ~= 7.9 ~= 8, so this recovers that value on a full-size
+  ## panel from a rule rather than a per-panel judgement call. On a small
+  ## worked example (e.g. this repo's own two-chromosome subsets, ~120k
+  ## markers) it derives a SMALLER floor than a full dataset would get --
+  ## expected, not a bug: real use of this pipeline assumes full datasets,
+  ## and a subset's floor being smaller than the full panel's is just what
+  ## "fewer markers" means under this rule. Only runs when `size_floor`
+  ## wasn't set explicitly (DEFAULTS or a dataset's own config.R); reads
+  ## map.rds's row count rather than loading the full genotype matrix.
+  if (is.null(cfg$size_floor)) {
+    map_f <- file.path(dataset_dir, "input", "map.rds")
+    n_markers <- if (file.exists(map_f)) nrow(readRDS(map_f)) else NA_integer_
+    cfg$size_floor <- if (is.na(n_markers)) 8L
+                      else max(1L, round(n_markers / cfg$size_floor_per_markers))
   }
   cfg
 }

@@ -4,6 +4,7 @@
 **/cache/
 **/output/
 summary.csv
+alignment_summary.csv
 
 ## Real GT panels are large and, per this project's established convention
 ## (LDscnR-paper/module_3sp/data/README.md), raw data is not committed --

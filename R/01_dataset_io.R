@@ -18,7 +18,44 @@
 ##                                       vector (names = rownames(genotypes)) or
 ##                                       a 1-column data.frame with those rownames
 ##   <dataset_dir>/input/config.R           optional: DEFAULTS overrides
-##   <dataset_dir>/input/perm_fun.R          optional: defines perm_fun(b, y)
+##   <dataset_dir>/input/perm_fun.R          REQUIRED for Stage A (run_stage_A()
+##                                       errors without it). Defines
+##                                       perm_fun(b, y): b is the permutation
+##                                       index, y the observed phenotype
+##                                       (individual-level, aligned to
+##                                       genotypes' rownames); must return a
+##                                       permuted phenotype of the same shape.
+##                                       No generic default is offered on
+##                                       purpose -- an earlier version fell
+##                                       back to an unstratified sample(y), and
+##                                       a later structure-aware default
+##                                       (shuffle within structure_group.rds at
+##                                       the INDIVIDUAL level) still broke the
+##                                       sampling design (an external audit
+##                                       found the phenotype, constant within
+##                                       every population in both worked
+##                                       examples, varied within 14/35 and
+##                                       9/30 populations after one such
+##                                       shuffle). What "no signal" means is
+##                                       specific to each dataset's own
+##                                       sampling design, so this repo asks
+##                                       for it explicitly, per dataset,
+##                                       rather than guess -- see examples/
+##                                       */input/perm_fun.R for the population-
+##                                       level, structure-preserving pattern
+##                                       both worked examples actually use.
+##                                       `.dataset_dir` (this dataset's own
+##                                       path) is available to the sourced
+##                                       script if it needs to read its own
+##                                       population.rds/structure_group.rds.
+##   <dataset_dir>/input/population.rds       optional (required only for
+##                                       check_structure_alignment(), R/08_
+##                                       structure_alignment.R): named vector,
+##                                       individual -> population ID.
+##   <dataset_dir>/input/structure_group.rds  optional: named vector, individual
+##                                       -> coarser sampling group (locality/
+##                                       lineage/etc); defaults to population.rds
+##                                       when absent.
 ##   <dataset_dir>/external_pvalues/*.rds  optional: one named p-value vector
 ##                                       (names = map$marker) per file; the
 ##                                       basename (sans .rds) becomes the engine
@@ -76,12 +113,28 @@ read_dataset <- function(dataset_dir, need_phenotype = FALSE) {
   list(genotypes = genotypes, map = map, phenotype = phenotype, dataset_dir = dataset_dir)
 }
 
-## perm_fun(b, y): the caller's permutation scheme. Default (no
-## input/perm_fun.R): a plain full-vector label permutation, sample(y).
+## perm_fun(b, y): the caller's permutation scheme. REQUIRED -- no generic
+## default. Two earlier defaults were tried and both broke the sampling
+## design: an unstratified sample(y), and (once that was flagged) a
+## structure_group.rds-based shuffle done at the INDIVIDUAL level -- an
+## external audit found that in both worked examples the phenotype is
+## constant within every population, and after one such shuffle it varied
+## WITHIN 14/35 (3sp) and 9/30 (9sp) populations, which never happens in the
+## real data. What "no signal" means -- which unit is permuted, what
+## structure is held fixed -- is specific to each dataset's own sampling
+## design (locality-stratified, lineage-stratified, population-level vs.
+## individual-level, ...), so this repo asks for it explicitly, once per
+## dataset, rather than guess a scheme that fits some designs and silently
+## breaks others. See examples/*/input/perm_fun.R for the population-level,
+## structure-preserving pattern both worked examples actually use.
 resolve_perm_fun <- function(dataset_dir) {
   pf_file <- file.path(dataset_dir, "input", "perm_fun.R")
-  if (!file.exists(pf_file)) return(function(b, y) sample(y))
+  if (!file.exists(pf_file))
+    stop("run_stage_A() needs ", pf_file, ", which is absent -- there is no generic default ",
+         "permutation scheme (see this function's own header for why). Define ",
+         "`perm_fun(b, y)` there for this dataset's own sampling design.")
   env <- new.env(parent = globalenv())
+  env$.dataset_dir <- dataset_dir   # available to the sourced script, e.g. to read its own population.rds
   sys.source(pf_file, envir = env)
   if (!is.function(env$perm_fun))
     stop(pf_file, " must define a function `perm_fun(b, y)`.")

@@ -21,12 +21,12 @@
 ## Cheap when "simes" is also requested: the scan is identical, so it is
 ## computed once and reused, not run twice.
 ##
-## The GRM is built from stage1$pruned -- the stage-1 cluster representatives
-## -- not a separate ld_w threshold: module_3sp/R/00_config.R's own measurement
-## found this "the easy call" (the same operation that defines the test units
-## also selects the kinship markers, and which pruning basis is used barely
-## moves the result, while WHETHER you prune at all is decisive). See that
-## file's GRM_BASIS section for the numbers.
+## The GRM (built from stage1$pruned -- the stage-1 cluster representatives,
+## not a separate ld_w threshold: module_3sp/R/00_config.R's own measurement
+## found this "the easy call", see that file's GRM_BASIS section) lives in
+## build_stage1() now, not here -- it's phenotype-free and
+## check_structure_alignment() (R/08_structure_alignment.R) needs the same
+## one. This file just reads `s1$GRM`.
 ## =============================================================================
 
 ## Run permutation index `b` through `perm_fun` and `emmax_fast`, seeded the
@@ -42,34 +42,34 @@
 ## @param cfg Resolved config; reads statistics, unit_repr, size_floor,
 ##   grm_method, b_unit, b_simes, seed, cores.
 ## @param force Rebuild every arm even if its receipt is current.
+## @param engine_suffix Appended to the "unit" arm's output directory name
+##   only (output/pvalues/emmax_unit<engine_suffix>/) -- used by
+##   run_floor_sweep() (R/09_floor_sweep.R) to keep each swept size_floor's
+##   unit-arm output distinct, since that arm's p-values genuinely depend on
+##   size_floor (ld_unit_matrix()'s columns change with it). The "simes" arm
+##   never depends on size_floor at this stage (only Stage B's aggregation
+##   does), so it is deliberately NOT suffixed -- one shared computation is
+##   reused, receipt-gated, across every floor in a sweep.
 ## @return Named list, one element per computed statistic ("unit"/"simes"),
 ##   each list(p_obs, p_perm, out_dir).
-run_stage_A <- function(dataset_dir, cfg = resolve_config(dataset_dir), force = FALSE) {
+run_stage_A <- function(dataset_dir, cfg = resolve_config(dataset_dir), force = FALSE, engine_suffix = "") {
   s1 <- build_stage1(dataset_dir, cfg)
   d  <- read_dataset(dataset_dir, need_phenotype = TRUE)
   perm_fun <- resolve_perm_fun(dataset_dir)
-
-  gds <- SNPRelate::snpgdsOpen(s1$gds_path, readonly = TRUE, allow.duplicate = TRUE)
-  on.exit(SNPRelate::snpgdsClose(gds), add = TRUE)
-  grm_markers <- unique(stats::na.omit(s1$stage1$pruned))
-  say("    [stage A] GRM: %s markers (stage-1 representatives), method = %s\n",
-      format(length(grm_markers), big.mark = ","), cfg$grm_method)
-  ## autosome.only = FALSE: SNPRelate::snpgdsGRM() defaults to a human-centric
-  ## numeric-autosome filter that silently excludes every marker ("Excluding N
-  ## SNPs (non-autosomes...)", not an error) whenever chromosome labels aren't
-  ## in its expected small-integer range -- which for many non-human panels'
-  ## Chr labels (e.g. "Chr19"/"Chr20" stored as character rather than an
-  ## integer-coded factor) is every marker. This tool has no business assuming
-  ## a human karyotype, and `snp.id = grm_markers` already says exactly which
-  ## markers to use -- SNPRelate's own filter on top of that is redundant even
-  ## when it isn't wrong.
-  GRM <- SNPRelate::snpgdsGRM(gds, snp.id = grm_markers, method = cfg$grm_method,
-                              autosome.only = FALSE, verbose = FALSE)$grm
+  GRM <- s1$GRM
 
   out <- list()
+  ## Depends on cache/'s own receipt, not just the raw input files: without
+  ## this, changing a decay_args/cr_rho setting rebuilds stage1 (build_stage1()
+  ## catches that on its own params) but this stage's receipt saw no change in
+  ## genotypes/map/phenotype and reported "up to date", silently keeping
+  ## association p-values computed against the OLD stage1/GRM. Found by an
+  ## external audit; run_stage_B() already had this dependency, this stage
+  ## didn't.
   stage_inputs <- c(file.path(dataset_dir, "input", "genotypes.rds"),
                     file.path(dataset_dir, "input", "map.rds"),
-                    file.path(dataset_dir, "input", "phenotype.rds"))
+                    file.path(dataset_dir, "input", "phenotype.rds"),
+                    receipt_path(file.path(dataset_dir, "cache")))
   perm_fun_file <- file.path(dataset_dir, "input", "perm_fun.R")
   if (file.exists(perm_fun_file)) stage_inputs <- c(stage_inputs, perm_fun_file)
 
@@ -89,12 +89,12 @@ run_stage_A <- function(dataset_dir, cfg = resolve_config(dataset_dir), force = 
   })
 
   if ("unit" %in% cfg$statistics) {
-    out_dir <- file.path(dataset_dir, "output", "pvalues", "emmax_unit")
+    out_dir <- file.path(dataset_dir, "output", "pvalues", paste0("emmax_unit", engine_suffix))
     params <- list(cr_rho = cfg$cr_rho, size_floor = cfg$size_floor, unit_repr = cfg$unit_repr,
                    grm_method = cfg$grm_method, b = cfg$b_unit, seed = cfg$seed)
-    if (force || stage_stale(out_dir, stage_inputs, params, label = "emmax_unit")) {
-      say("    [emmax_unit] ld_unit_matrix(repr = \"%s\") + emmax_fast, %d permutations\n",
-          cfg$unit_repr, cfg$b_unit)
+    if (force || stage_stale(out_dir, stage_inputs, params, label = paste0("emmax_unit", engine_suffix))) {
+      say("    [emmax_unit%s] ld_unit_matrix(repr = \"%s\", size_floor = %d) + emmax_fast, %d permutations\n",
+          engine_suffix, cfg$unit_repr, cfg$size_floor, cfg$b_unit)
       um <- ld_unit_matrix(s1$genotypes, s1$stage1, s1$map, size_floor = cfg$size_floor,
                            repr = cfg$unit_repr)
       prep <- emmax_setup(um, GRM)

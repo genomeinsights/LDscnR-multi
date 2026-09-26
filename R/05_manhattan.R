@@ -12,7 +12,7 @@
 ##
 ## Two things this file adds on top of ld_manhattan() itself:
 ##
-## - It plots `p_display`/`q_display`, not the tested `p`/`q` (see
+## - It plots `p_display`/`q_display`, not the tested `unit_p`/`unit_q` (see
 ##   R/04_stage_B_outlier.R's header) -- for the "unit" statistic this is a
 ##   genuine per-marker EMMAX scan, not the tested cluster's value broadcast
 ##   flat across every member, so a "unit" engine's panel shows real per-SNP
@@ -22,6 +22,17 @@
 ##   own ld_manhattan() call assign colours independently -- so the same
 ##   physical region reads as the same colour in every stacked panel, not a
 ##   coincidence of that panel's own region ordering.
+##
+## Colouring is driven by snp_results.csv's OWN `region_id` (correct,
+## membership-based -- see R/04_stage_B_outlier.R's header) mapped to the
+## shared locus that contains it, via a REGION-level lookup (this engine's own
+## region_table.csv against `loci`, a handful of rows) -- never a fresh
+## marker-position join against `loci` here. An earlier version did exactly
+## that fresh join, which (an external audit caught) coloured every marker
+## physically inside a region's bounding span regardless of whether it was
+## ever actually a tested member of that region -- the same coordinate-vs-
+## membership mistake `.build_snp_results()`'s header describes, reproduced a
+## second time in the plotting code.
 ##
 ## Grey-vs-colour draw order is NOT handled here: ld_manhattan()'s own
 ## group/regions mode already draws the "ns" (grey) layer before the coloured
@@ -67,7 +78,13 @@
 ## @param colour_by "region" (every locus its own persistent colour, shared
 ##   across panels -- see .master_loci() above), "significant" (two-colour
 ##   group: significant vs not), or "none".
-## @param value "q" or "p" -- plots -log10(q_display)/-log10(p_display).
+## @param value "q" or "p" (plots -log10(q_display)/-log10(p_display)), or
+##   "ld_w_095" -- local-LD support at rho = 0.95 (R/02_stage1_cluster.R),
+##   plotted RAW (no -log10 transform; already a bounded [0,1] LD statistic),
+##   with `hline`/hline-based defaults skipped since -log10(alpha) isn't a
+##   meaningful reference on this scale. Otherwise identical: same panels,
+##   same faceting, same colour_by. Useful to compare a significant region's
+##   location against local LD directly, independent of any association test.
 ## @param alpha Draws the dashed significance reference at -log10(alpha)
 ##   (ignored if `hline` is set explicitly).
 ## @param hline Override the reference line's y value, or NULL for none.
@@ -78,11 +95,12 @@
 ## @return A single ggplot (one engine) or a patchwork object (multiple engines).
 ldm_manhattan <- function(dataset_dir, engines = NULL,
                           colour_by = c("region", "significant", "none"),
-                          value = c("q", "p"), alpha = 0.05, hline = -log10(alpha),
+                          value = c("q", "p", "ld_w_095"), alpha = 0.05,
+                          hline = if (value == "ld_w_095") NULL else -log10(alpha),
                           highlight = NULL, ncol = 1, point_size = 1.2) {
   colour_by <- match.arg(colour_by)
   value <- match.arg(value)
-  value_col <- paste0(value, "_display")
+  value_col <- if (value == "ld_w_095") "ld_w_095" else paste0(value, "_display")
 
   if (is.null(engines)) {
     out_dir <- file.path(dataset_dir, "output")
@@ -106,19 +124,33 @@ ldm_manhattan <- function(dataset_dir, engines = NULL,
                               " -- run_stage_B(dataset_dir, \"", eng, "\") first.")
     d <- data.table::fread(f)
     map_e <- d[, .(marker, Chr, Pos)]
-    yv <- -log10(pmax(d[[value_col]], .Machine$double.xmin))
+    yv <- if (value == "ld_w_095") as.numeric(d[[value_col]])
+          else -log10(pmax(d[[value_col]], .Machine$double.xmin))
     names(yv) <- d$marker
+    value_label <- if (value == "ld_w_095") "ld_w (rho = 0.95)" else sprintf("-log10(%s)", value)
 
-    args <- list(map = map_e, value = yv, value_label = sprintf("-log10(%s)", value),
+    args <- list(map = map_e, value = yv, value_label = value_label,
                 title = eng, hline = hline, qtn = highlight, point_size = point_size)
     if (colour_by == "region") {
       if (!is.null(loci) && nrow(loci)) {
-        qx <- d[, .(marker, Chr, from = Pos, to = Pos)]
-        lj <- data.table::foverlaps(qx, loci, by.x = c("Chr", "from", "to"),
-                                    type = "within", mult = "first", nomatch = NA)
-        grp <- stats::setNames(lj$locus_id, d$marker)
-        grp <- grp[!is.na(grp)]
-        if (length(grp)) { args$group <- grp; args$group_colours <- pal[unique(grp)] }
+        rt_f <- file.path(dataset_dir, "output", paste0("stageB_", eng), "region_table.csv")
+        rt <- if (file.exists(rt_f)) data.table::fread(rt_f) else data.table::data.table()
+        if (nrow(rt)) {
+          ## same region_id string .build_snp_results() used, so this engine's
+          ## own d$region_id values match these rows exactly.
+          rt[, region_id := sprintf("%s:%.0f-%.0f", Chr, from, to)]
+          data.table::setkey(rt, Chr, from, to)
+          rl <- data.table::foverlaps(rt[, .(Chr, from, to, region_id)], loci,
+                                      by.x = c("Chr", "from", "to"), type = "within",
+                                      mult = "first", nomatch = NA)
+          region_to_locus <- stats::setNames(rl$locus_id, rl$region_id)
+          sig <- d[!is.na(region_id) & region_id %chin% names(region_to_locus)]
+          if (nrow(sig)) {
+            grp <- stats::setNames(region_to_locus[sig$region_id], sig$marker)
+            grp <- grp[!is.na(grp)]
+            if (length(grp)) { args$group <- grp; args$group_colours <- pal[unique(grp)] }
+          }
+        }
       }
     } else if (colour_by == "significant") {
       tested <- d[tested == TRUE]

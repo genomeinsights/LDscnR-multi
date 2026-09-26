@@ -29,7 +29,12 @@ suppressMessages(library(data.table))
 
 HERE <- path.expand("~/gitlab/LDscnR-multi/examples")
 
-write_example <- function(out_dir, GTs, map, eco, chrs) {
+## `pheno`/`structure_col`: optional. When given, also writes
+## input/population.rds (from pheno$pop_ID) and input/structure_group.rds
+## (from pheno[[structure_col]]) for the structure-alignment diagnostic --
+## see R/08_structure_alignment.R. `pheno` must be in the same row order as
+## GTs/eco (true of both bundles here; never re-sorted).
+write_example <- function(out_dir, GTs, map, eco, chrs, pheno = NULL, structure_col = NULL) {
   keep <- map$Chr %in% chrs
   map_sub <- map[keep, .(marker, Chr, Pos)]
   GT_sub <- GTs[, keep, drop = FALSE]
@@ -43,13 +48,24 @@ write_example <- function(out_dir, GTs, map, eco, chrs) {
   saveRDS(stats::setNames(as.numeric(eco), rownames(GT_sub)), file.path(in_dir, "phenotype.rds"))
   cat(sprintf("  wrote %s: %d individuals x %s markers (%s)\n", out_dir,
               nrow(GT_sub), format(ncol(GT_sub), big.mark = ","), paste(chrs, collapse = "+")))
+
+  if (!is.null(pheno)) {
+    stopifnot(nrow(pheno) == nrow(GT_sub))
+    saveRDS(stats::setNames(as.character(pheno$pop_ID), rownames(GT_sub)),
+           file.path(in_dir, "population.rds"))
+    saveRDS(stats::setNames(as.character(pheno[[structure_col]]), rownames(GT_sub)),
+           file.path(in_dir, "structure_group.rds"))
+    cat(sprintf("  wrote population.rds (%d pops) + structure_group.rds (from %s, %d groups)\n",
+                length(unique(pheno$pop_ID)), structure_col, length(unique(pheno[[structure_col]]))))
+  }
   map_sub
 }
 
 ## ---- 3sp: Chr1 + Chr4 ----------------------------------------------------------
 cat("[1] 3sp (Chr1 + Chr4)\n")
 b3 <- readRDS(path.expand("~/gitlab/LDscnR-paper/module_3sp/out/02_bundle/bundle.rds"))
-map3_sub <- write_example(file.path(HERE, "3sp_chr1_chr4"), b3$GTs, b3$map, b3$eco, c("Chr1", "Chr4"))
+map3_sub <- write_example(file.path(HERE, "3sp_chr1_chr4"), b3$GTs, b3$map, b3$eco, c("Chr1", "Chr4"),
+                          pheno = b3$pheno, structure_col = "pop_locality")
 
 ## external p-value engine: LFMM, aligned to map3_sub exactly as
 ## module_3sp/R/04_lfmm.R aligns it to the full bundle's map (see that file's
@@ -76,7 +92,8 @@ rm(b3, e); gc()
 ## ---- 9sp: Chr19 + Chr20 ---------------------------------------------------------
 cat("\n[2] 9sp (Chr19 + Chr20)\n")
 b9 <- readRDS(path.expand("~/gitlab/LDscnR-paper/module_9sp/out/02_bundle/bundle.rds"))
-write_example(file.path(HERE, "9sp_chr19_chr20"), b9$GTs, b9$map, b9$eco, c("Chr19", "Chr20"))
+write_example(file.path(HERE, "9sp_chr19_chr20"), b9$GTs, b9$map, b9$eco, c("Chr19", "Chr20"),
+             pheno = b9$pheno, structure_col = "lineage")
 rm(b9); gc()
 
 cat("\ndone.\n")
