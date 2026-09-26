@@ -52,8 +52,16 @@ build_stage1 <- function(dataset_dir, cfg = resolve_config(dataset_dir), force =
   on.exit(SNPRelate::snpgdsClose(gds), add = TRUE)
 
   dir.create(el_dir, recursive = TRUE, showWarnings = FALSE)
+  ## Trailing separator, deliberately: compute_LD_decay(el_data_folder=)
+  ## writes each chromosome's edge list via plain string concatenation
+  ## (`paste0(el_data_folder, ch, ".el")`, R/compute_ld_structure.R), not
+  ## file.path() -- passed a bare directory it writes a SIBLING file named
+  ## by gluing the directory's own name onto the chromosome
+  ## (".../cache/edge_listsChr1.el", leaving ".../cache/edge_lists/" empty),
+  ## not a file inside it. A trailing "/" makes the same concatenation land
+  ## correctly inside the directory instead.
   decay_args <- utils::modifyList(cfg$decay_args,
-                                  list(gds = gds, el_data_folder = el_dir, seed = cfg$seed))
+                                  list(gds = gds, el_data_folder = paste0(el_dir, "/"), seed = cfg$seed))
   LD_decay <- do.call(compute_LD_decay, decay_args)
 
   map <- d$map
