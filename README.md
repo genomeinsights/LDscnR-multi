@@ -23,6 +23,16 @@ Plus a flexible, multi-track Manhattan plot (`ldm_manhattan()`) and a batch
 loop (`run_all()`) that isolates one dataset's failure from the rest and
 writes a `summary.csv`.
 
+`ldm_manhattan()` stacks one panel per engine (`ggplot2`/`patchwork`, via
+`LDscnR::ld_manhattan()`). Non-significant markers are always the grey
+background layer, drawn before -- never over -- the coloured ones. With the
+default `colour_by = "region"`, colour is assigned to a genome-wide set of
+loci built once across every panel being plotted (the union of all engines'
+significant regions, merged where they physically overlap -- different
+engines' own region assembly rarely agrees on exact bounds), so the same
+underlying region reads as the same colour in every stacked panel, with one
+shared, deduplicated legend.
+
 ## Quick start
 
 ```r
@@ -67,20 +77,31 @@ Rscript run_batch.R examples/                 # every subfolder with an input/
                        stage-1 clustering. Rebuilt automatically when input/
                        changes (content-hash receipts, not timestamps).
   output/                   gitignored, regenerable:
-    pvalues/emmax_unit/, pvalues/emmax_simes/   Stage A's p_obs.rds/p_perm.rds
+    pvalues/emmax_unit/     p_obs.rds/p_perm.rds (the unit-level test) plus
+                       p_obs_marker.rds -- a genuine per-marker EMMAX scan
+                       (same GRM, same phenotype), computed purely so the
+                       "unit" engine's plot can show real per-SNP variation
+                       (see snp_results.csv below).
+    pvalues/emmax_simes/    p_obs.rds/p_perm.rds
     stageB_<engine>/     outlier_test.rds, outlier_perm.rds (if a permuted
                        null was available), region_rotation.rds (if an
                        annotation was given), snp_results.csv, region_table.csv
     figures/manhattan.{png,pdf}
 ```
 
-`snp_results.csv` columns: `marker, Chr, Pos, statistic, p, q, unit_id,
-region_id, significant, tested`. For `statistic = "simes"` (marker-aligned
-p-values, including every external engine), `p`/`q` are the marker's own
-values. For `statistic = "unit"`, no per-marker p exists -- `p`/`q` are the
-marker's cluster's aggregate value, broadcast to every member (documented,
-not hidden: it's the evidence that drove that cluster's significance, not
-independent per-SNP evidence).
+`snp_results.csv` columns: `marker, Chr, Pos, statistic, p, q, p_display,
+q_display, unit_id, region_id, significant, tested`. `p`/`q` are the value
+the significance test actually used. For `statistic = "simes"` (marker-aligned
+p-values, including every external engine) that's the marker's own value.
+For `statistic = "unit"`, no per-marker p exists -- `p`/`q` are the marker's
+cluster's aggregate value, broadcast to every member (documented, not
+hidden: it's the evidence that drove that cluster's significance, not
+independent per-SNP evidence). `p_display`/`q_display` are what
+`ldm_manhattan()` actually plots: identical to `p`/`q` except for
+`statistic = "unit"`, where they come from `p_obs_marker.rds` above -- a real
+per-SNP value, distinct from the flat broadcast one, so the plot shows
+genuine within-cluster variation. `unit_id`/`region_id`/`significant` always
+come from the actual test, regardless of which p/q pair you're looking at.
 
 Config precedence: `R/00_config.R`'s `DEFAULTS` < dataset `input/config.R` <
 an explicit `cfg =` argument at the call site.
@@ -103,10 +124,13 @@ install, and a stale `LDscnR` install partway through a batch of hundreds of
 datasets is exactly the kind of thing worth catching loudly and immediately.
 `run_batch.R` and the examples above use `devtools::load_all()`, not
 `library()`, matching every `LDscnR-paper` module -- `LDscnR` is still under
-active development on the `outlier-scan` branch. If you update `LDscnR` and
-this check fails, either update `LDSCNR_PIN` in `R/00_config.R` (after
-confirming the change is intentional) or set `LDSCNR_LAX=1` to proceed
-anyway.
+active development (currently on `main`; the `outlier-scan` branch this was
+first pinned to was fast-forwarded into it and is now a stale ancestor, not
+a separate line -- `LDSCNR_PIN$branch` tracks whichever is current). If you
+update `LDscnR` and this check fails, either update `LDSCNR_PIN` in
+`R/00_config.R` (after confirming the change is intentional -- see the
+`LDscnR` repo's own commit log for what changed) or set `LDSCNR_LAX=1` to
+proceed anyway.
 
 ## Examples
 

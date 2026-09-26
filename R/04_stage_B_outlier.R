@@ -21,14 +21,22 @@
 ## engine), a marker's own p/q are its own -- q is BH over the full p_obs
 ## vector, independent of which clusters were tested, matching module_3sp's
 ## display convention. For `statistic = "unit"`, no per-marker p exists at all
-## (p_obs is one value per cluster-summary-variable); a marker's p/q are its
-## unit's aggregate values broadcast to every member. This is a display choice,
-## documented rather than hidden: it is the evidence that drove that marker's
-## cluster's significance, not independent per-SNP evidence.
+## (p_obs is one value per cluster-summary-variable); `p`/`q` are the TESTED
+## unit's aggregate values broadcast to every member -- kept, not hidden, as
+## the record of what was actually tested. `p_display`/`q_display` are what a
+## Manhattan plot should use instead: for "simes" and every external engine
+## they are identical to `p`/`q` (already per-marker); for "unit" they come
+## from a genuine per-marker EMMAX scan run purely for display (see
+## R/03_stage_A_emmax.R's `p_obs_marker.rds`), so a unit-arm plot shows real
+## per-SNP variation within a cluster rather than one flat broadcast value,
+## while `significant`/`region_id`/`unit_id` still come from the actual test.
 ## =============================================================================
 
 ## Turn an ld_outlier_test() result back into one row per marker.
-.build_snp_results <- function(map, test, p_obs, statistic) {
+## `p_display`: optional marker-aligned vector for the plotting y-axis when it
+## differs from the tested `p_obs` (only meaningful for statistic = "unit";
+## see the file header). NULL falls back to `p`/`q`.
+.build_snp_results <- function(map, test, p_obs, statistic, p_display = NULL) {
   mp <- data.table::as.data.table(map)[, .(marker, Chr, Pos)]
   qx <- mp[, .(marker, Chr, from = Pos, to = Pos)]
 
@@ -61,12 +69,23 @@
     out[, p := as.numeric(p_obs)]
     out[, q := stats::p.adjust(p, method = "BH")]
     out[, significant := uj$significant]   # cluster-test significance, marker's own p/q
+    out[, `:=`(p_display = p, q_display = q)]
   } else {
     out[, p := uj$p][, q := uj$q][, significant := uj$significant]
+    if (!is.null(p_display)) {
+      if (length(p_display) != nrow(map))
+        stop("p_display must have one value per marker, aligned to map (",
+             length(p_display), " vs ", nrow(map), ").")
+      out[, p_display := as.numeric(p_display)]
+      out[, q_display := stats::p.adjust(p_display, method = "BH")]
+    } else {
+      out[, `:=`(p_display = p, q_display = q)]
+    }
   }
   out[, tested := !is.na(unit_id)]
   data.table::setcolorder(out, c("marker", "Chr", "Pos", "statistic", "p", "q",
-                                 "unit_id", "region_id", "significant", "tested"))
+                                 "p_display", "q_display", "unit_id", "region_id",
+                                 "significant", "tested"))
   out[]
 }
 
@@ -86,7 +105,7 @@
 ## @param force Rebuild even if the receipt says nothing changed.
 ## @return list(test, perm, rotation, snp_results, out_dir) -- perm/rotation NULL
 ##   when no p_perm/annotation was available.
-run_stage_B <- function(dataset_dir, engine, p_obs = NULL, p_perm = NULL,
+run_stage_B <- function(dataset_dir, engine, p_obs = NULL, p_perm = NULL, p_display = NULL,
                         statistic = if (engine == "emmax_unit") "unit" else "simes",
                         cfg = resolve_config(dataset_dir),
                         annotation = NULL, chrom_lengths = NULL, force = FALSE) {
@@ -103,6 +122,10 @@ run_stage_B <- function(dataset_dir, engine, p_obs = NULL, p_perm = NULL,
       if (is.null(p_perm) && file.exists(file.path(stageA_dir, "p_perm.rds"))) {
         p_perm <- readRDS(file.path(stageA_dir, "p_perm.rds"))
         src_paths <- c(src_paths, file.path(stageA_dir, "p_perm.rds"))
+      }
+      if (is.null(p_display) && file.exists(file.path(stageA_dir, "p_obs_marker.rds"))) {
+        p_display <- as.numeric(readRDS(file.path(stageA_dir, "p_obs_marker.rds"))[map$marker])
+        src_paths <- c(src_paths, file.path(stageA_dir, "p_obs_marker.rds"))
       }
     } else if (file.exists(ext_f)) {
       p_named <- readRDS(ext_f)
@@ -161,7 +184,7 @@ run_stage_B <- function(dataset_dir, engine, p_obs = NULL, p_perm = NULL,
     print(rotation)
   }
 
-  snp_results <- .build_snp_results(map, test, p_obs, statistic)
+  snp_results <- .build_snp_results(map, test, p_obs, statistic, p_display = p_display)
 
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
   saveRDS(test, file.path(out_dir, "outlier_test.rds"))

@@ -15,3 +15,4 @@ summary.csv
 .Rhistory
 .RData
 .Rproj.user/
+.DS_Store

@@ -10,6 +10,17 @@
 ## per cluster via Simes' method inside ld_outlier_test(). Both write a
 ## p_obs/p_perm pair under output/pvalues/<engine>/, ready for Stage B.
 ##
+## "unit" ALSO writes a marker-level companion, p_obs_marker.rds -- the same
+## per-marker EMMAX scan (same GRM, same phenotype) "simes" computes for its
+## own test, but here purely for DISPLAY resolution. The "unit" TEST itself
+## has no per-marker p (p_obs is one value per cluster-summary-variable), so
+## without this a per-SNP plot of the unit arm can only show every member of a
+## cluster at its cluster's flat, broadcast value. module_3sp/R_figures/
+## figure_manhattan.R makes exactly this choice for the same reason (its
+## `pm_emmax` is plotted regardless of which statistic was actually tested).
+## Cheap when "simes" is also requested: the scan is identical, so it is
+## computed once and reused, not run twice.
+##
 ## The GRM is built from stage1$pruned -- the stage-1 cluster representatives
 ## -- not a separate ld_w threshold: module_3sp/R/00_config.R's own measurement
 ## found this "the easy call" (the same operation that defines the test units
@@ -62,6 +73,21 @@ run_stage_A <- function(dataset_dir, cfg = resolve_config(dataset_dir), force = 
   perm_fun_file <- file.path(dataset_dir, "input", "perm_fun.R")
   if (file.exists(perm_fun_file)) stage_inputs <- c(stage_inputs, perm_fun_file)
 
+  ## Memoised marker-level scan: built the first time either arm needs it,
+  ## reused by the second so "unit" and "simes" never pay for it twice.
+  .marker_scan <- local({
+    cache <- NULL
+    function() {
+      if (is.null(cache)) {
+        prep <- emmax_setup(s1$genotypes, GRM)
+        p_obs <- emmax_fast(prep, d$phenotype)
+        names(p_obs) <- colnames(s1$genotypes)
+        cache <<- list(prep = prep, p_obs = p_obs)
+      }
+      cache
+    }
+  })
+
   if ("unit" %in% cfg$statistics) {
     out_dir <- file.path(dataset_dir, "output", "pvalues", "emmax_unit")
     params <- list(cr_rho = cfg$cr_rho, size_floor = cfg$size_floor, unit_repr = cfg$unit_repr,
@@ -74,15 +100,18 @@ run_stage_A <- function(dataset_dir, cfg = resolve_config(dataset_dir), force = 
       prep <- emmax_setup(um, GRM)
       p_obs <- emmax_fast(prep, d$phenotype)
       p_perm <- .emmax_perm_matrix(prep, d$phenotype, perm_fun, cfg$b_unit, cfg$cores)
+      p_obs_marker <- .marker_scan()$p_obs   ## display-only companion; see file header
       dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
       saveRDS(p_obs, file.path(out_dir, "p_obs.rds"))
       saveRDS(p_perm, file.path(out_dir, "p_perm.rds"))
+      saveRDS(p_obs_marker, file.path(out_dir, "p_obs_marker.rds"))
       saveRDS(params, file.path(out_dir, "params.rds"))
       write_receipt(out_dir, inputs = stage_inputs, params = params,
-                    outputs = file.path(out_dir, c("p_obs.rds", "p_perm.rds")))
+                    outputs = file.path(out_dir, c("p_obs.rds", "p_perm.rds", "p_obs_marker.rds")))
     }
     out$unit <- list(p_obs = readRDS(file.path(out_dir, "p_obs.rds")),
-                     p_perm = readRDS(file.path(out_dir, "p_perm.rds")), out_dir = out_dir)
+                     p_perm = readRDS(file.path(out_dir, "p_perm.rds")),
+                     p_obs_marker = readRDS(file.path(out_dir, "p_obs_marker.rds")), out_dir = out_dir)
   }
 
   if ("simes" %in% cfg$statistics) {
@@ -91,10 +120,9 @@ run_stage_A <- function(dataset_dir, cfg = resolve_config(dataset_dir), force = 
     if (force || stage_stale(out_dir, stage_inputs, params, label = "emmax_simes")) {
       say("    [emmax_simes] marker-level emmax_fast, %d permutations (rescans every marker per draw)\n",
           cfg$b_simes)
-      prep <- emmax_setup(s1$genotypes, GRM)
-      p_obs <- emmax_fast(prep, d$phenotype)
-      names(p_obs) <- colnames(s1$genotypes)
-      p_perm <- .emmax_perm_matrix(prep, d$phenotype, perm_fun, cfg$b_simes, cfg$cores)
+      ms <- .marker_scan()
+      p_obs <- ms$p_obs
+      p_perm <- .emmax_perm_matrix(ms$prep, d$phenotype, perm_fun, cfg$b_simes, cfg$cores)
       rownames(p_perm) <- colnames(s1$genotypes)
       dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
       saveRDS(p_obs, file.path(out_dir, "p_obs.rds"))

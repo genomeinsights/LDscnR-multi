@@ -25,8 +25,7 @@ DEFAULTS <- list(
   decay_args          = list(min_maf_decay = 0.1, q = 0.95, n_sub_bg = 5000,
                               n_win_decay = 20, overlap = 0.5, max_SNPs_decay = Inf,
                               prob_robust = 0.95, max_pairs = 5000, ld_method = "corr",
-                              n_strata = 20, slide = 1000, cores = 1,
-                              ld_w_rho = 0.95),   # needed for assembly = "stage2_discovered"'s ld_w_095 flag column
+                              n_strata = 20, slide = 1000, cores = 1),
   ## Stage A: EMMAX
   statistics          = c("unit", "simes"),   # which arm(s) to compute; either or both
   unit_repr           = "consensus_dosage",   # ld_unit_matrix() representation for the "unit" arm
@@ -55,9 +54,12 @@ DEFAULTS <- list(
 ## where a silent stale install would be most expensive to discover late.
 LDSCNR_PIN <- list(
   repo    = path.expand("~/gitlab/LDscnR"),
-  branch  = "outlier-scan",
-  sha     = "011a165c8c99",
-  src_sha = "362892c1ee4c6628"
+  ## outlier-scan (the branch this was first pinned to) was fast-forwarded
+  ## into main and development has continued there since -- outlier-scan
+  ## itself is now a stale ancestor, not a separate line.
+  branch  = "main",
+  sha     = "2993ea80e6c8",
+  src_sha = "dc89dbdc504fb660"
 )
 
 check_ldscnr <- function(stop_on_fail = !nzchar(Sys.getenv("LDSCNR_LAX"))) {
@@ -96,8 +98,20 @@ receipt_path <- function(stage_dir) file.path(stage_dir, "_receipt.rds")
 
 sha <- function(f) if (file.exists(f)) digest::digest(f, algo = "sha256", file = TRUE) else NA_character_
 
+## Every input path is normalised before it's used as a hash-table key (by
+## write_receipt() when storing, by stage_stale() when comparing) -- a raw
+## path string is not, e.g. "examples/x/input/map.rds" and
+## "/Users/.../examples/x/input/map.rds" name the same file but are different
+## strings, so a receipt written from one and checked from the other looked
+## "changed" and triggered a needless rebuild (found running the exact same
+## dataset via a relative-path caller after an earlier absolute-path run).
+## normalizePath(mustWork = FALSE) so a genuinely missing input still shows up
+## as "changed" (sha() returns NA for it) rather than erroring here.
+.norm_path <- function(p) if (!length(p)) character() else normalizePath(p, mustWork = FALSE)
+
 write_receipt <- function(stage_dir, inputs = character(), params = list(), outputs = character()) {
   dir.create(stage_dir, recursive = TRUE, showWarnings = FALSE)
+  inputs <- .norm_path(inputs)
   saveRDS(list(when = Sys.time(),
                ldscnr = tryCatch(check_ldscnr(stop_on_fail = FALSE), error = function(e) NA),
                inputs = data.table(path = inputs, sha256 = vapply(inputs, sha, "")),
@@ -112,6 +126,7 @@ stage_stale <- function(stage_dir, inputs = character(), params = list(), label 
   if (!file.exists(rp)) { message("    [", label, "] no receipt -- will run"); return(TRUE) }
   r <- readRDS(rp)
   if (!identical(params, r$params)) { message("    [", label, "] parameters changed -- will run"); return(TRUE) }
+  inputs <- .norm_path(inputs)
   now <- vapply(inputs, sha, "")
   old <- stats::setNames(r$inputs$sha256, r$inputs$path)
   ch <- names(now)[is.na(old[names(now)]) | old[names(now)] != now]

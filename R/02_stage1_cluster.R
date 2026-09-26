@@ -7,13 +7,15 @@
 ## `run_stage_B()` (ld_outlier_test/perm) need the same `stage1` object, so it
 ## is built once here and cached, not recomputed by whichever stage runs first.
 ##
-## Also computes `ld_w_095` and attaches it to `map` before clustering, because
-## `ld_outlier_test(assembly = "stage2_discovered")` hardcodes a lookup of a
-## column BY THAT NAME on `stage1$map_snp` (see R/ld_prune_and_eMLG.R's
-## `ld_w_col = "ld_w_095"` inside R/ld_outlier_test.R) -- not optional, and not
-## documented anywhere a first-time caller would find it before hitting the
-## error. Getting this wrong is exactly the kind of thing this repo exists to
-## get right once instead of per dataset.
+## Until LDscnR commit 5f12cd2, this also had to compute an `ld_w_095` column
+## and attach it to `map` before clustering, because
+## `ld_outlier_test(assembly = "stage2_discovered")` hardcoded a lookup of a
+## column by that exact name. That commit replaced it with `n_loci` (always
+## present on `stage1$map_snp`, always positive -- a structural no-op for the
+## same "flag every significant cluster" purpose `ld_w_col`/`ld_w_threshold`
+## always served there), so no `ld_w` column is required at all any more.
+## Removed here rather than left as a harmless no-op: it cost a real
+## `compute_ld_w()` pass on every dataset for nothing.
 ## =============================================================================
 
 ## Build (or load, if unchanged) a dataset's stage-1 LD clustering.
@@ -22,8 +24,7 @@
 ## @param cfg Resolved config (see resolve_config()); only `cr_rho`,
 ##   `decay_args`, `seed`, `cores` are read.
 ## @param force Rebuild even if the receipt says nothing changed.
-## @return list(gds_path, LD_decay, stage1, map, genotypes) -- `map` here
-##   carries the `ld_w_095` column stage1 was built with; `gds_path` is a
+## @return list(gds_path, LD_decay, stage1, map, genotypes) -- `gds_path` is a
 ##   closed file path (reopen with SNPRelate::snpgdsOpen() if needed).
 build_stage1 <- function(dataset_dir, cfg = resolve_config(dataset_dir), force = FALSE) {
   cache_dir <- file.path(dataset_dir, "cache")
@@ -55,14 +56,7 @@ build_stage1 <- function(dataset_dir, cfg = resolve_config(dataset_dir), force =
                                   list(gds = gds, el_data_folder = el_dir, seed = cfg$seed))
   LD_decay <- do.call(compute_LD_decay, decay_args)
 
-  ## ld_w_095: required by ld_outlier_test(assembly = "stage2_discovered"); see
-  ## the file header. compute_ld_w()'s return is a plain named vector when a
-  ## single rho was requested, or a matrix (columns "rho_<value>") for more
-  ## than one -- handle both rather than assume decay_args$ld_w_rho's length.
-  map <- data.table::copy(d$map)
-  ldw <- LD_decay$ld_ws
-  map$ld_w_095 <- if (is.matrix(ldw)) ldw[map$marker, "rho_0.95"] else ldw[map$marker]
-
+  map <- d$map
   stage1 <- ld_complexity_reduction(map = map, LD_decay = LD_decay, rho = cfg$cr_rho,
                                     cores = cfg$cores, gds = gds_path)
 
