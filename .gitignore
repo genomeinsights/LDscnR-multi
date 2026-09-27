@@ -13,6 +13,11 @@ alignment_summary.csv
 ## verified end-to-end without external data. Do not add a blanket input/
 ## ignore rule that would also hide those.
 
+## Full-genome dataset folders for timing/size_floor-at-realistic-scale runs
+## (see full_runs/build_full.R) -- large (multi-hundred-MB GT matrices),
+## never committed.
+full_runs/
+
 .Rhistory
 .RData
 .Rproj.user/

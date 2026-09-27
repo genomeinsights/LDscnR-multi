@@ -189,11 +189,45 @@
   merge(rep_marker[, .(unit_id, grp_id)], span[, .(grp_id, region_id)], by = "grp_id")[, .(unit_id, region_id)]
 }
 
+## Wraps a COMPACT simes permutation matrix (rows = only the markers whose
+## cluster clears size_floor at scan time -- see run_stage_A()'s "simes"
+## arm) into the full-length, positionally-aligned function(b) accessor
+## ld_outlier_perm()/.ld_outlier_tested_units() require for statistic =
+## "simes" (LDscnR: `length(p_obs) == nrow(map)`, strictly). NA outside the
+## eligible rows is safe, never actually read: every unit's member_idx
+## (.ld_outlier_units(), LDscnR) only indexes markers inside a cluster that
+## clears size_floor -- exactly the eligible set the compact matrix already
+## covers. Pads freshly on each call (one length(map$marker) vector) rather
+## than ever materialising a dense markers x B matrix -- the whole point of
+## keeping the matrix compact on disk in the first place.
+.simes_perm_accessor <- function(p_perm_compact, map) {
+  idx <- match(rownames(p_perm_compact), map$marker)
+  if (anyNA(idx))
+    stop("p_perm_compact's markers are not all present in `map` -- stage1/map has changed ",
+         "since this Stage A run; rerun run_stage_A().")
+  n <- nrow(map)
+  function(b) {
+    v <- rep(NA_real_, n)
+    v[idx] <- p_perm_compact[, b]
+    v
+  }
+}
+
 ## @param dataset_dir Path to one dataset folder.
 ## @param engine Name for this p-value source (e.g. "emmax_unit", "emmax_simes",
 ##   or an external_pvalues/<engine>.rds basename). Determines output/stageB_<engine>/.
 ## @param p_obs,p_perm Optional. If NULL, resolved from
 ##   output/pvalues/<engine>/ (Stage A) or external_pvalues/<engine>.rds.
+## @param p_perm_compact Optional, alternative to `p_perm` for a "simes"-style
+##   engine: a COMPACT permutation matrix (rows = only the markers a scan
+##   covered, e.g. size_floor-eligible ones -- see run_stage_A()'s "simes"
+##   arm), `rownames()` giving each row's marker. Wrapped into the
+##   full-length accessor `.ld_outlier_tested_units()` requires internally --
+##   callers that already have a compact matrix (run_floor_sweep(), reusing
+##   the unsuffixed "emmax_simes" scan under a floor-suffixed engine label)
+##   should pass it here rather than pre-building the accessor themselves, so
+##   the digest/surrogate-count bookkeeping stays in this one place. Ignored
+##   if `p_perm` is also given.
 ## @param statistic "unit" or "simes"; default guessed from `engine`
 ##   ("emmax_unit" -> "unit", anything else -> "simes", since external
 ##   p-values are always marker-aligned).
@@ -202,15 +236,57 @@
 ##   chrom_lengths is derived from `map` (max Pos per Chr).
 ## @param cfg Resolved config; reads size_floor, alpha, assembly,
 ##   score_threshold, distance_threshold, gap, n_rotations, rotation_scheme, cores.
+## @param observed_only TRUE for a permutation-free call: `p_perm`/
+##   `p_perm_compact` are forced NULL regardless of what was passed in AND
+##   the disk auto-resolution branch below is never entered, so a permutation
+##   file sitting in this (or any) engine's output/pvalues/ folder -- e.g. a
+##   canonical floor's cached p_perm_compact.rds, from run_floor_profile()
+##   (R/11_floor_profile.R) -- can never be picked up by an observed-only
+##   call by accident. `annotation` is likewise ignored (ld_region_rotation()
+##   never runs), with a one-line note if one was supplied anyway. Part of
+##   `params` below, so switching modes on the same engine name correctly
+##   invalidates the other mode's cached result.
 ## @param force Rebuild even if the receipt says nothing changed.
 ## @return list(test, perm, rotation, snp_results, out_dir) -- perm/rotation NULL
-##   when no p_perm/annotation was available.
-run_stage_B <- function(dataset_dir, engine, p_obs = NULL, p_perm = NULL, p_display = NULL,
+##   when no p_perm/annotation was available (always, when observed_only).
+##   Also writes report.txt (the console text of LDscnR's own
+##   print.ld_outlier_test()/print.ld_outlier_perm()/print.ld_region_rotation(),
+##   concatenated -- no separate summary logic here).
+run_stage_B <- function(dataset_dir, engine, p_obs = NULL, p_perm = NULL, p_perm_compact = NULL,
+                        p_display = NULL,
                         statistic = if (engine == "emmax_unit") "unit" else "simes",
                         cfg = resolve_config(dataset_dir),
-                        annotation = NULL, chrom_lengths = NULL, force = FALSE) {
+                        annotation = NULL, chrom_lengths = NULL, observed_only = FALSE, force = FALSE) {
   s1 <- build_stage1(dataset_dir, cfg)
   map <- s1$map
+
+  if (isTRUE(observed_only)) {
+    if (!is.null(annotation))
+      say("    [stageB:%s] observed_only = TRUE -- ignoring supplied `annotation` (no ld_region_rotation())\n", engine)
+    p_perm <- NULL
+    p_perm_compact <- NULL
+    annotation <- NULL
+  }
+
+  ## p_perm_for_digest/p_perm_B: p_perm itself may end up a function(b)
+  ## closure (the compact-simes case), which digest::digest() and
+  ## length()/ncol() can't meaningfully summarise -- these track the actual
+  ## underlying data and surrogate count instead, for the receipt digest and
+  ## the ld_outlier_perm() call below respectively. Left NULL/derived from
+  ## p_perm itself when a caller supplies p_perm directly as a plain
+  ## matrix/list (the pre-existing contract, e.g. an external p_perm).
+  p_perm_for_digest <- NULL
+  p_perm_B <- NULL
+
+  ## p_perm_compact takes priority over p_perm when both are given a value
+  ## (they shouldn't be -- one caller wouldn't normally pass both), building
+  ## the digest source/surrogate count consistently with the disk-resolution
+  ## path below.
+  if (!is.null(p_perm_compact) && is.null(p_perm)) {
+    p_perm_for_digest <- p_perm_compact
+    p_perm_B <- ncol(p_perm_compact)
+    p_perm <- .simes_perm_accessor(p_perm_compact, map)
+  }
 
   src_paths <- character()
   if (is.null(p_obs)) {
@@ -219,9 +295,28 @@ run_stage_B <- function(dataset_dir, engine, p_obs = NULL, p_perm = NULL, p_disp
     if (file.exists(file.path(stageA_dir, "p_obs.rds"))) {
       p_obs <- readRDS(file.path(stageA_dir, "p_obs.rds"))
       src_paths <- c(src_paths, file.path(stageA_dir, "p_obs.rds"))
-      if (is.null(p_perm) && file.exists(file.path(stageA_dir, "p_perm.rds"))) {
-        p_perm <- readRDS(file.path(stageA_dir, "p_perm.rds"))
-        src_paths <- c(src_paths, file.path(stageA_dir, "p_perm.rds"))
+      compact_f <- file.path(stageA_dir, "p_perm_compact.rds")
+      plain_f <- file.path(stageA_dir, "p_perm.rds")
+      ## !observed_only guards BOTH branches explicitly, not just relying on
+      ## p_perm already being NULL above -- that reset only covers a value
+      ## the CALLER passed in; without this, the auto-resolve-from-disk logic
+      ## here would still fire on `is.null(p_perm)` alone and load whatever
+      ## permutation file happens to sit in this engine's output/pvalues/
+      ## folder (e.g. a canonical floor's p_perm_compact.rds), exactly the
+      ## accidental-reuse this parameter exists to rule out.
+      if (!observed_only && is.null(p_perm) && file.exists(compact_f)) {
+        ## "simes" arm's permutation scan is restricted to markers whose
+        ## cluster clears size_floor (see run_stage_A()'s header) -- compact
+        ## on disk, expanded to the full-length, NA-padded form
+        ## .ld_outlier_tested_units() requires only transiently, per surrogate.
+        p_perm_for_digest <- readRDS(compact_f)
+        p_perm_B <- ncol(p_perm_for_digest)
+        p_perm <- .simes_perm_accessor(p_perm_for_digest, map)
+        src_paths <- c(src_paths, compact_f)
+      } else if (!observed_only && is.null(p_perm) && file.exists(plain_f)) {
+        p_perm <- readRDS(plain_f)
+        p_perm_for_digest <- p_perm
+        src_paths <- c(src_paths, plain_f)
       }
       if (is.null(p_display) && file.exists(file.path(stageA_dir, "p_obs_marker.rds"))) {
         p_display <- as.numeric(readRDS(file.path(stageA_dir, "p_obs_marker.rds"))[map$marker])
@@ -236,6 +331,20 @@ run_stage_B <- function(dataset_dir, engine, p_obs = NULL, p_perm = NULL, p_disp
       stop("run_stage_B(): no p-values for engine \"", engine, "\" -- neither ",
            stageA_dir, "/p_obs.rds nor ", ext_f, " exists.")
     }
+  }
+
+  ## Caller-supplied p_perm (bypassing the disk-resolution branch above --
+  ## e.g. run_floor_sweep()'s reused "unit" arm): derive the digest source/B
+  ## from it directly. Only matrix/list forms are supported here; a bare
+  ## function(b) needs the compact-simes auto-resolution path above, which
+  ## already set both.
+  if (is.null(p_perm_for_digest) && !is.null(p_perm)) p_perm_for_digest <- p_perm
+  if (is.null(p_perm_B) && !is.null(p_perm)) {
+    p_perm_B <- if (is.matrix(p_perm)) ncol(p_perm) else if (is.list(p_perm)) length(p_perm) else NA_integer_
+    if (is.na(p_perm_B))
+      stop("run_stage_B(): p_perm is a function but its surrogate count (B) could not be ",
+           "determined -- pass p_perm as a matrix or list, or resolve it via ",
+           "output/pvalues/<engine>/p_perm_compact.rds (see run_stage_A()).")
   }
 
   if (!is.null(annotation) && is.null(chrom_lengths))
@@ -253,8 +362,14 @@ run_stage_B <- function(dataset_dir, engine, p_obs = NULL, p_perm = NULL, p_disp
                  assembly = cfg$assembly, score_threshold = cfg$score_threshold,
                  distance_threshold = cfg$distance_threshold, gap = cfg$gap,
                  n_rotations = cfg$n_rotations, rotation_scheme = cfg$rotation_scheme,
+                 observed_only = observed_only,
                  p_obs_digest = digest::digest(p_obs, algo = "sha256"),
-                 p_perm_digest = if (!is.null(p_perm)) digest::digest(p_perm, algo = "sha256") else NA_character_,
+                 ## p_perm_for_digest, not p_perm: when p_perm is the compact-simes
+                 ## function(b) accessor, digesting the underlying compact matrix
+                 ## directly is well-defined and unambiguous; digesting a closure
+                 ## isn't (it hashes serialized bytecode/environment, not the data
+                 ## a reader would expect a "p_perm changed" check to track).
+                 p_perm_digest = if (!is.null(p_perm_for_digest)) digest::digest(p_perm_for_digest, algo = "sha256") else NA_character_,
                  annotation_digest = if (!is.null(annotation)) digest::digest(annotation, algo = "sha256") else NA_character_,
                  chrom_lengths_digest = if (!is.null(chrom_lengths)) digest::digest(chrom_lengths, algo = "sha256") else NA_character_)
   inputs <- c(src_paths, receipt_path(file.path(dataset_dir, "cache")))
@@ -265,8 +380,32 @@ run_stage_B <- function(dataset_dir, engine, p_obs = NULL, p_perm = NULL, p_disp
                         readRDS(file.path(out_dir, "outlier_perm.rds")) else NULL,
                rotation = if (file.exists(file.path(out_dir, "region_rotation.rds")))
                             readRDS(file.path(out_dir, "region_rotation.rds")) else NULL,
-               snp_results = data.table::fread(file.path(out_dir, "snp_results.csv")),
+               ## na.strings = c("NA", ""): fwrite() writes NA_character_ as
+               ## an empty CSV field, and fread()'s own default na.strings =
+               ## "NA" does not treat that empty field as NA back -- silently
+               ## round-tripping this cache-hit's region_id/marker_p (etc.)
+               ## NAs into "" instead. A caller checking !is.na(region_id)
+               ## (this repo's own R/11_floor_profile.R, among others) would
+               ## then treat every UNTESTED marker as if it belonged to a
+               ## real (empty-string-named) region spanning the whole
+               ## chromosome -- caught directly, not assumed, via a genuine
+               ## crash it produced once left unfixed.
+               snp_results = data.table::fread(file.path(out_dir, "snp_results.csv"),
+                                               na.strings = c("NA", "")),
                out_dir = out_dir))
+  }
+
+  ## Every object below already has its own LDscnR print.* method
+  ## (print.ld_outlier_test(), print.ld_outlier_perm(),
+  ## print.ld_region_rotation()) -- .print_and_log() captures exactly what
+  ## that method would print to console (so nothing here reformats or
+  ## duplicates what those methods already report), echoes it to console as
+  ## before, and accumulates it into report_lines for report.txt below.
+  report_lines <- character()
+  .print_and_log <- function(x) {
+    txt <- utils::capture.output(print(x))
+    cat(txt, sep = "\n"); cat("\n")
+    report_lines <<- c(report_lines, txt, "")
   }
 
   say("    [stageB:%s] ld_outlier_test(statistic = \"%s\")\n", engine, statistic)
@@ -274,15 +413,19 @@ run_stage_B <- function(dataset_dir, engine, p_obs = NULL, p_perm = NULL, p_disp
                           alpha = cfg$alpha, assembly = cfg$assembly, GTs = s1$genotypes,
                           LD_decay = s1$LD_decay, score_threshold = cfg$score_threshold,
                           distance_threshold = cfg$distance_threshold, gap = cfg$gap)
-  print(test)
+  .print_and_log(test)
 
   perm <- NULL
   if (!is.null(p_perm)) {
-    B <- if (is.matrix(p_perm)) ncol(p_perm) else length(p_perm)
+    ## p_perm_B, not re-derived from p_perm here: p_perm may be the compact-
+    ## simes function(b) accessor, for which is.matrix()/length() give
+    ## nothing meaningful -- p_perm_B already carries the real count from
+    ## wherever p_perm was resolved, above.
+    B <- p_perm_B
     say("    [stageB:%s] ld_outlier_perm(): %d surrogates\n", engine, B)
     perm <- ld_outlier_perm(test, s1$stage1, map, p_perm, GTs = s1$genotypes, LD_decay = s1$LD_decay,
                             B = B, level = "units", cores = cfg$cores)
-    print(perm)
+    .print_and_log(perm)
   }
 
   rotation <- NULL
@@ -291,7 +434,7 @@ run_stage_B <- function(dataset_dir, engine, p_obs = NULL, p_perm = NULL, p_disp
     rotation <- ld_region_rotation(data.table::copy(test$regions), annotation, chrom_lengths,
                                    scheme = cfg$rotation_scheme, n_rotations = cfg$n_rotations,
                                    seed = cfg$seed)
-    print(rotation)
+    .print_and_log(rotation)
   }
 
   snp_results <- .build_snp_results(map, test, p_obs, statistic, stage1 = s1$stage1,
@@ -306,12 +449,14 @@ run_stage_B <- function(dataset_dir, engine, p_obs = NULL, p_perm = NULL, p_disp
   if (!is.null(rotation)) saveRDS(rotation, rot_f) else if (file.exists(rot_f)) file.remove(rot_f)
   data.table::fwrite(snp_results, file.path(out_dir, "snp_results.csv"))
   data.table::fwrite(test$regions, file.path(out_dir, "region_table.csv"))
+  writeLines(report_lines, file.path(out_dir, "report.txt"))
   ## Only the outputs THIS call actually wrote -- a leftover outlier_perm.rds/
   ## region_rotation.rds from an earlier call that supplied p_perm/annotation
   ## is removed above, not left for stage_stale()'s existence check to trip
   ## over, and not falsely promised here for a call that has neither.
   write_receipt(out_dir, inputs = inputs, params = params,
                 outputs = file.path(out_dir, c("outlier_test.rds", "snp_results.csv", "region_table.csv",
+                                               "report.txt",
                                                if (!is.null(perm)) "outlier_perm.rds",
                                                if (!is.null(rotation)) "region_rotation.rds")))
 

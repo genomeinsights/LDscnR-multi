@@ -39,7 +39,6 @@ build_stage1 <- function(dataset_dir, cfg = resolve_config(dataset_dir), force =
   dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
   gds_path   <- file.path(cache_dir, "genotypes.gds")
   stage1_rds <- file.path(cache_dir, "stage1.rds")
-  el_dir     <- file.path(cache_dir, "edge_lists")
 
   d <- read_dataset(dataset_dir, need_phenotype = FALSE)
   inputs <- c(file.path(dataset_dir, "input", "genotypes.rds"),
@@ -60,22 +59,45 @@ build_stage1 <- function(dataset_dir, cfg = resolve_config(dataset_dir), force =
   gds <- create_gds_from_geno(d$genotypes, d$map, gds_path)
   on.exit(SNPRelate::snpgdsClose(gds), add = TRUE)
 
-  dir.create(el_dir, recursive = TRUE, showWarnings = FALSE)
-  ## Trailing separator, deliberately: compute_LD_decay(el_data_folder=)
-  ## writes each chromosome's edge list via plain string concatenation
-  ## (`paste0(el_data_folder, ch, ".el")`, R/compute_ld_structure.R), not
-  ## file.path() -- passed a bare directory it writes a SIBLING file named
-  ## by gluing the directory's own name onto the chromosome
-  ## (".../cache/edge_listsChr1.el", leaving ".../cache/edge_lists/" empty),
-  ## not a file inside it. A trailing "/" makes the same concatenation land
-  ## correctly inside the directory instead.
-  decay_args <- utils::modifyList(cfg$decay_args,
-                                  list(gds = gds, el_data_folder = paste0(el_dir, "/"), seed = cfg$seed))
+  ## Deliberately NOT passing el_data_folder (nor keep_el = TRUE): at full-
+  ## genome marker density, one chromosome's unfiltered edge list (every SNP
+  ## against its next `slide` neighbours, no r2 floor) runs 4-5 GiB, and
+  ## el_data_folder would persist every chromosome's simultaneously (compute_ld_w()
+  ## below needs every chromosome's a_pred, so nothing is deleted until all are
+  ## fitted) -- tens of GiB of temp disk for one dataset. Leaving `el` unset
+  ## instead makes every downstream consumer rebuild it from `gds`, one
+  ## chromosome at a time, discarded immediately after use:
+  ##   - ld_complexity_reduction() below already has this fallback
+  ##     (LDscnR's .chr_edge_list()), and for THAT caller specifically the
+  ##     on-the-fly rebuild is floor-filtered at construction (el_floor =
+  ##     the clustering r2 threshold) -- LDscnR's own comment on that path:
+  ##     "the difference between ~15M rows and the few that clear the
+  ##     threshold." Genuinely cheaper than reading a saved, unfiltered file.
+  ##   - compute_ld_w() just below is given `gds` explicitly for the same
+  ##     on-the-fly rebuild (it has no fallback of its own the way
+  ##     ld_complexity_reduction() does).
+  ## Clustering itself is unaffected by losing "long-range" edges beyond
+  ## `slide`: ld_complexity_reduction() single-links markers by connected
+  ## components (igraph::components()) on the thresholded graph, so a
+  ## genuinely extended LD block (an inversion) still merges into one
+  ## component through a chain of locally-adjacent above-threshold edges --
+  ## no single pair at opposite ends of the block ever needs to be directly
+  ## compared. See the LD-decay report (R/10_ld_decay_report.R) for tuning
+  ## `slide` itself, the other lever on `el` size.
+  decay_args <- utils::modifyList(cfg$decay_args, list(gds = gds, seed = cfg$seed))
   LD_decay <- do.call(compute_LD_decay, decay_args)
 
   say("    [stage1] ld_w (rho = 0.95) per marker\n")
   map <- data.table::copy(d$map)
-  ldw <- compute_ld_w(LD_decay, rho = 0.95, cores = cfg$cores)   # single rho -> plain named vector
+  ## cores = 1, not cfg$cores: compute_ld_w() has no reopen-per-forked-worker
+  ## logic (unlike ld_complexity_reduction()'s reopen_path below), so handing
+  ## it this call's own already-open `gds` handle under parallel_apply's
+  ## forking would share one live GDS connection across worker processes --
+  ## exactly what ld_complexity_reduction() explicitly avoids doing. Forcing
+  ## serial execution here keeps this correct rather than merely usually
+  ## working; a smaller, calibrated `slide` keeps each chromosome's rebuild
+  ## cheap enough that this doesn't dominate runtime.
+  ldw <- compute_ld_w(LD_decay, rho = 0.95, cores = 1, gds = gds)   # single rho -> plain named vector
   map$ld_w_095 <- as.numeric(ldw[map$marker])
 
   stage1 <- ld_complexity_reduction(map = map, LD_decay = LD_decay, rho = cfg$cr_rho,

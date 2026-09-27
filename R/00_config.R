@@ -22,10 +22,32 @@ suppressMessages({library(data.table); library(digest)})
 DEFAULTS <- list(
   ## stage1 clustering (genotype-only)
   cr_rho              = 0.5,      # ld_complexity_reduction rho
+  ## slide = 450, not compute_LD_decay()'s own default of 1000: `slide` sizes
+  ## the raw pairwise edge list (every SNP against its next `slide` SNPs, no
+  ## r2 floor) that both ld_complexity_reduction() and compute_ld_w() build
+  ## per chromosome -- at full-genome marker density, slide=1000 runs 4-5 GiB
+  ## PER CHROMOSOME, which is why el_data_folder is no longer used at all
+  ## (R/02_stage1_cluster.R) and every consumer rebuilds it on the fly
+  ## instead. 450 comes from a calibration run on the full 3sp genome (20
+  ## chromosomes, LDscnR-paper/module_3sp): a cheap max_SNPs_decay = 5000 scan
+  ## put the tool's own "suggested slide for rho = 0.99" at up to 397 SNPs
+  ## (Chr4, the chromosome carrying the ecotype-associated Eda region --
+  ## genuinely needs the most). A follow-up max_SNPs_decay sweep (5k/10k/
+  ## 20k/40k) at that slide showed the fitted decay rate `a` still rising at
+  ## every step, not yet converged -- but monotonically, EVERY chromosome,
+  ## always in the direction of a subsampled (sparser) fit reading a SLOWER
+  ## decay than the true one. A slower apparent decay implies a LARGER
+  ## required window, so the 5000-subsample estimate this 450 is based on is
+  ## systematically conservative (oversized), never undersized, relative to
+  ## the true full-density value -- confirmed directly on Chr17, whose true
+  ## marker count (34,714) is itself below the 40k sweep step, so its value
+  ## there already IS the unbiased full-density fit and still followed the
+  ## same direction. Safe to use without paying for a full, unsampled
+  ## calibration pass.
   decay_args          = list(min_maf_decay = 0.1, q = 0.95, n_sub_bg = 5000,
                               n_win_decay = 20, overlap = 0.5, max_SNPs_decay = Inf,
                               prob_robust = 0.95, max_pairs = 5000, ld_method = "corr",
-                              n_strata = 20, slide = 1000, cores = 1),
+                              n_strata = 20, slide = 450, cores = 1),
   ## Stage A: EMMAX
   statistics          = c("unit", "simes"),   # which arm(s) to compute; either or both
   unit_repr           = "consensus_dosage",   # ld_unit_matrix() representation for the "unit" arm
@@ -217,7 +239,16 @@ resolve_config <- function(dataset_dir) {
     map_f <- file.path(dataset_dir, "input", "map.rds")
     n_markers <- if (file.exists(map_f)) nrow(readRDS(map_f)) else NA_integer_
     cfg$size_floor <- if (is.na(n_markers)) 8L
-                      else max(1L, round(n_markers / cfg$size_floor_per_markers))
+                      else round(n_markers / cfg$size_floor_per_markers)
   }
+  ## Hard floor of 2, unconditionally -- a singleton "cluster" (size_floor =
+  ## 1) is the single most effect-size-inflated, least reliable unit this
+  ## pipeline can test (one marker's own sampling noise, with nothing to
+  ## average it against), and removing singletons has the single biggest
+  ## effect on result quality of anything size_floor controls. Applied AFTER
+  ## the derivation above, and to an explicit override from DEFAULTS/a
+  ## dataset's own config.R too, so "regardless of how many SNPs are
+  ## analysed" is a genuine invariant, not just this rule's own default.
+  cfg$size_floor <- max(2L, as.integer(cfg$size_floor))
   cfg
 }

@@ -3,12 +3,18 @@
 ##
 ## SIZE_FLOOR SENSITIVITY SWEEP. Whether this is cheap depends on which arm:
 ##
-##   "simes": CHEAP. Stage A's marker-level EMMAX scan (R/03_stage_A_emmax.R)
-##   never depends on size_floor -- only Stage B's per-cluster aggregation
-##   does. run_stage_A() writes that arm to a size_floor-independent,
-##   UNSUFFIXED path ("emmax_simes"), so calling it again at a different
-##   floor just reports "up to date" and costs nothing; only Stage B
-##   (ld_outlier_test's aggregation) reruns per floor.
+##   "simes": CHEAP, PROVIDED `simes_floor` is pinned to the sweep's LOWEST
+##   floor for every call. Stage A's OBSERVED marker-level scan never
+##   depended on size_floor and still doesn't; the PERMUTATION scan is now
+##   restricted to markers whose cluster clears `simes_floor` (see
+##   R/03_stage_A_emmax.R's "simes" arm) -- a lower floor only ever makes
+##   MORE markers eligible, so scanning once at this sweep's minimum floor
+##   is a superset covering every higher floor tested below it. Every call
+##   below passes `simes_floor = min(floors)`, not `fl`, for exactly this
+##   reason: run_stage_A() writes that arm to a size_floor-independent,
+##   UNSUFFIXED path ("emmax_simes"), so after the first floor's call builds
+##   it, every later floor's call just reports "up to date" and costs
+##   nothing; only Stage B (ld_outlier_test's aggregation) reruns per floor.
 ##
 ##   "unit": NOT CHEAP. ld_unit_matrix()'s columns are themselves determined
 ##   by which Stage-1 clusters clear size_floor, so a different floor is a
@@ -20,14 +26,17 @@
 ##
 ## Floors are deduplicated by their RESOLVED INTEGER VALUE, not by the
 ## requested factor: on a small panel (e.g. this repo's own worked examples,
-## where cfg$size_floor derives to 1 -- see R/00_config.R's DERIVED
-## SIZE_FLOOR) a 0.5x factor floors to the same value as 1x, and the two
-## naturally collapse onto one shared computation rather than a wasted repeat.
+## where cfg$size_floor derives to the hard minimum of 2 -- see
+## R/00_config.R's DERIVED SIZE_FLOOR) a 0.5x factor floors to the same
+## value as 1x, and the two naturally collapse onto one shared computation
+## rather than a wasted repeat.
 ## =============================================================================
 
 ## @param dataset_dir Path to one dataset folder.
 ## @param factors Multipliers applied to `cfg$size_floor` (default: half,
-##   default, double). Each resolves to `max(1L, round(base_floor * factor))`.
+##   default, double). Each resolves to `max(2L, round(base_floor *
+##   factor))` -- never below 2, the same "no singleton clusters" floor
+##   `resolve_config()` enforces unconditionally (R/00_config.R).
 ## @param cfg Resolved config (resolve_config(dataset_dir) by default); its
 ##   OWN `size_floor` is the sweep's base/"default" point.
 ## @param annotation,chrom_lengths,force Passed through to every
@@ -43,7 +52,7 @@ run_floor_sweep <- function(dataset_dir, factors = c(0.5, 1, 2), cfg = resolve_c
     stop("run_floor_sweep() needs input/phenotype.rds (Stage A must be able to run).")
 
   base_floor <- cfg$size_floor
-  floor_of <- vapply(factors, function(f) as.integer(max(1L, round(base_floor * f))), 0L)
+  floor_of <- vapply(factors, function(f) as.integer(max(2L, round(base_floor * f))), 0L)
   by_floor <- split(factors, floor_of)   # dedupe: factors that resolve to the same floor share one run
   floors <- as.integer(names(by_floor))
   say("=== %s: floor sweep -- base %d, factors %s -> floors %s ===\n",
@@ -53,13 +62,19 @@ run_floor_sweep <- function(dataset_dir, factors = c(0.5, 1, 2), cfg = resolve_c
   all_engines <- character()
   rows <- vector("list", length(floors))
 
+  sweep_min_floor <- min(floors)
+
   for (i in seq_along(floors)) {
     fl <- floors[i]
     say("\n--- floor = %d (factor(s) %s) ---\n", fl, paste(by_floor[[i]], collapse = ", "))
     cfg_fl <- utils::modifyList(cfg, list(size_floor = fl))
     suffix <- sprintf("_floor%d", fl)
 
-    stageA <- run_stage_A(dataset_dir, cfg_fl, force = force, engine_suffix = suffix)
+    ## simes_floor = sweep_min_floor, not fl -- see file header. Harmless to
+    ## pass on every iteration: after the first floor builds it, every later
+    ## call's receipt matches and this is a fast "up to date" no-op.
+    stageA <- run_stage_A(dataset_dir, cfg_fl, force = force, engine_suffix = suffix,
+                          simes_floor = sweep_min_floor)
 
     ## statistic = "unit" explicit: run_stage_B()'s own default guesses from
     ## `engine == "emmax_unit"` exactly, which this floor-suffixed name never
@@ -72,7 +87,7 @@ run_floor_sweep <- function(dataset_dir, factors = c(0.5, 1, 2), cfg = resolve_c
     simes_dir <- file.path(dataset_dir, "output", "pvalues", "emmax_simes")
     res_simes <- run_stage_B(dataset_dir, simes_engine,
                              p_obs = readRDS(file.path(simes_dir, "p_obs.rds")),
-                             p_perm = readRDS(file.path(simes_dir, "p_perm.rds")),
+                             p_perm_compact = readRDS(file.path(simes_dir, "p_perm_compact.rds")),
                              statistic = "simes", cfg = cfg_fl, annotation = annotation,
                              chrom_lengths = chrom_lengths, force = force)
 
