@@ -22,3 +22,10 @@ full_runs/
 .RData
 .Rproj.user/
 .DS_Store
+
+## LaTeX build artifacts for doc/manual.tex -- only the .tex source and the
+## built .pdf are committed, not pdflatex's own intermediate files.
+doc/*.aux
+doc/*.log
+doc/*.out
+doc/*.toc
