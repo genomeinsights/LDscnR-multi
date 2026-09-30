@@ -110,8 +110,39 @@ build_stage1 <- function(dataset_dir, cfg = resolve_config(dataset_dir), force =
   ## here with the GRM build itself) -- SNPRelate::snpgdsGRM() otherwise
   ## silently excludes every marker whenever chromosome labels aren't in its
   ## human-centric numeric range.
-  GRM <- SNPRelate::snpgdsGRM(gds, snp.id = grm_markers, method = cfg$grm_method,
-                              autosome.only = FALSE, verbose = FALSE)$grm
+  ##
+  ## missing.rate = 1 (SNPRelate's own default is 0.01): the default excludes
+  ## any marker with MORE than 1% of individuals missing a call -- with any
+  ## genuinely missing genotypes (this pipeline's own real datasets have
+  ## never been zero-missing, e.g. formica_hybrid's ~5.9%), and with n in the
+  ## hundreds, the probability that a GIVEN marker has NO missing calls at
+  ## all approaches zero, so the default filter silently discards nearly
+  ## EVERY marker, not a handful -- confirmed directly: n=150, 6% missing,
+  ## 2,000 candidate markers -> 1,998 excluded, GRM built from 2 markers,
+  ## cor with the true (complete-data) GRM = NA. This is NOT a computation
+  ## bug in snpgdsGRM() itself: with missing.rate = 1 (exclude nothing),
+  ## snpgdsGRM()'s own GCTA formula on the SAME missing data matches an
+  ## independently-implemented, pairwise-complete-observations R
+  ## reimplementation (~/gitlab/pike_phenology/R/grm_functions.R's
+  ## gcta_grm(), verified there to reproduce snpgdsGRM(GCTA) to machine
+  ## precision on complete data) to machine precision too -- the bug is
+  ## entirely the default marker-exclusion threshold, not the arithmetic.
+  ## Diagnosed against real missing-genotype data 2026-09-30 (see also
+  ## LDscnR-multi's own missing-data audit, same date).
+  GRM_obj <- SNPRelate::snpgdsGRM(gds, snp.id = grm_markers, method = cfg$grm_method,
+                                  autosome.only = FALSE, missing.rate = 1, verbose = FALSE)
+  ## Self-verifying, not just trusting the parameter above forever: if a
+  ## future SNPRelate version changes what missing.rate = 1 means, or this
+  ## call is ever edited without noticing why, silently losing markers here
+  ## again should be a loud, immediate error, not a repeat of the silent
+  ## corruption this fix exists to close.
+  if (length(GRM_obj$snp.id) != length(grm_markers))
+    stop(sprintf(
+      "snpgdsGRM() used %d of %d requested GRM markers -- missing.rate = 1 ",
+      length(GRM_obj$snp.id), length(grm_markers)),
+      "should make every requested marker contribute regardless of missing ",
+      "genotypes; investigate before trusting this GRM.")
+  GRM <- GRM_obj$grm
 
   saveRDS(list(stage1 = stage1, LD_decay = LD_decay, map = map, GRM = GRM), stage1_rds)
   write_receipt(cache_dir, inputs = inputs, params = params, outputs = stage1_rds)
