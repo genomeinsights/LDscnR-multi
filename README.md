@@ -3,21 +3,25 @@
 Batch driver for [LDscnR](https://github.com/genomeinsights/LDscnR)'s
 association + LD-aware outlier-region pipeline: run it across as many
 self-contained dataset folders as exist on disk, write the results back into
-each folder, and roll up a cross-dataset summary. Built for a comparative
-project that will screen hundreds of GT panels; this repo is the looping
-code, not a package -- it depends on `LDscnR` being present locally (see
+each folder, and roll up a cross-dataset summary. It works for one dataset
+or hundreds. This repo is the workflow, not a package -- it depends on
+`LDscnR` being installed (see
 "LDscnR version" below) and sources plain `R/*.R` files.
+
+On the example machines, complete full-genome runs took about **12 minutes
+for 790,578 markers (3sp)** and **24 minutes for 1,195,557 markers (9sp)**.
+These are measured examples, not guaranteed runtimes. The EMMAX scans are
+comparatively fast because `emmax_fast()` reuses the fitted relationship
+model; Stage-1 LD work and the floor profile account for much of the time.
 
 Two stages, per dataset:
 
 - **Stage A** (`run_stage_A()`): genotypes + map + phenotype -> EMMAX
   observed and permuted-null p-values (two arms: `emmax_unit`, one test per
   LD-cluster; `emmax_simes`, one test per marker aggregated per cluster).
-- **Stage B** (`run_stage_B()`): *any* p-value vector -> LDscnR's
-  `ld_outlier_test()`/`ld_outlier_perm()` -> per-marker results and a region
-  table. Engine-agnostic: Stage A's own arms and any external p-values you
-  drop in (LFMM, or anything else that produces one p-value per marker) go
-  through the identical call.
+- **Stage B** (`run_stage_B()`): tests the Stage-1 units and assembles
+  significant units into reported regions. It accepts Stage A's results or
+  marker-level p-values from an external method such as LFMM.
 
 Plus a flexible, multi-track Manhattan plot (`ldm_manhattan()`), a pre-scan
 diagnostic for phenotype/structure confounding (`check_structure_alignment()`),
@@ -27,64 +31,36 @@ cheaper observed-only floor-profile alternative for batch use
 dataset's failure from the rest and writes `summary.csv` +
 `alignment_summary.csv`.
 
-`ldm_manhattan()` is a from-scratch `ggplot2`/`patchwork` build (no longer a
-wrapper over `LDscnR::ld_manhattan()`'s per-chromosome `facet_wrap()`),
-styled directly after the ACTUAL plotting code (not just the rendered
-image) of
-`~/gitlab/formica_hybrid/module_manuscript_rho05/module_BayPass/R/formica_region_concordance.R`'s
-`make_panel()`, which produces
-`figures/formica_local_score_vs_ld_regions.png`: one continuous genome-wide
-axis (chromosomes concatenated, separated by `chr_gap` [default 0.03, as a
-fraction of the largest chromosome's own length], not faceted into
-separate panels), with alternating light-grey bands (`chr_shade = TRUE` by
-default, one band every other chromosome) marking where each chromosome
-starts and ends -- LDscnR-multi's own addition, not in the reference
-figure, added because a chromosome with no significant markers of its own
-is otherwise invisible in the grey point cloud. Stacked one panel per
-engine sharing that axis (shown only on the bottom panel). Non-significant
-markers are always the grey background layer (`colour = "grey73"`,
-`size = 0.45`, `alpha = 0.45`), drawn before -- never over -- the coloured
-ones (`size = point_size` [default 1.6], `alpha = 0.90`). With the default
-`colour_by = "region"`, colour is assigned to a genome-wide set of loci
-built once across every panel being
-plotted (the union of all engines' significant regions, merged where they
-physically overlap -- different engines' own region assembly rarely agrees
-on exact bounds), so the same underlying region reads as the same colour
-in every stacked panel. Colours themselves come from
-`.assign_locus_colours()`, porting the reference script's own algorithm:
-`LDscnR::default_cluster_colours()`, filtered by standard luminance to
-drop near-white entries (invisible against a white background), then
-walked in genomic order picking, at each step, the available colour with
-the greatest minimum CIE Lab distance from the last few already assigned
--- so two physically nearby loci (the ones most likely to be confused) are
-never handed similar hues by chance. Each locus also gets a short
-persistent ID ("R1", "R2", ... in genomic order); rather than a legend,
-the `max_labels` most significant loci per panel are labelled directly on
-the plot via `ggrepel::geom_label_repel()`, using the reference's own
-label styling exactly: a WHITE box (`fill = "white"`, `alpha = 0.96`) with
-bold, per-locus COLOURED text and border (`colour = locus colour`,
-`label.size = 0.2`) -- not a solid-colour box -- and the reference's own
-nudge/collision-avoidance tuning (`nudge_y` proportional to the panel's
-own y-range, `box.padding = 0.25`, `point.padding = 0.1`,
-`min.segment.length = 0`, `max.overlaps = Inf`). The y-axis itself
-reserves headroom for labels above the highest point the same way
-(`coord_cartesian(ylim = c(lo - 0.04*span, hi + 0.42*span), clip = "off")`).
-Labelling is deliberately selective (matching the reference figure): every
-significant marker is coloured, but labelling dozens of regions at once
-would be unreadable, so each panel labels only its own top `max_labels`
-loci by that panel's best q/p value.
+The Manhattan plots put methods on a shared genome-wide axis. Grey points
+show background markers; coloured points identify reported regions. Nearby
+regions receive contrasting colours, and selected regions are labelled
+directly. See the manual for plotting options and examples.
 
 ## Quick start
 
+The same `run_dataset()` call works for one dataset; `run_all()` or
+`run_batch.R` loops over many folders. A full guide is in
+[`doc/manual.pdf`](doc/manual.pdf).
+
 ```r
-devtools::load_all("~/gitlab/LDscnR")   # see "LDscnR version" below
-for (f in list.files("R", pattern = "\\.R$", full.names = TRUE)) source(f)
+remotes::install_github("genomeinsights/LDscnR@2fc1d44a2552") # once
+library(LDscnR)
+for (f in sort(list.files("R", pattern = "\\.R$", full.names = TRUE))) source(f)
 
 run_dataset("examples/3sp_chr1_chr4")
 result <- run_all(c("examples/3sp_chr1_chr4", "examples/9sp_chr19_chr20"))
 result$summary            # one row per (dataset, engine)
 result$alignment_summary  # one row per dataset with input/population.rds
 ```
+
+For very dense panels, consider a phenotype-blind, reproducible thinning
+step to approximately one million well-distributed filtered markers before
+creating the input files. Sample across chromosomes and short physical bins,
+retaining several markers in each bin; do not keep only one marker per LD
+cluster. Apply the identical marker subset to the map, genotype matrix and
+external p-value vectors. This is a practical runtime target, **not** a
+detection guarantee: thinning can change LD clusters and remove a genuine
+signal. Compare a representative dense and thinned analysis if possible.
 
 or from the shell:
 
@@ -513,13 +489,6 @@ plain, unsuffixed labels regardless. Nothing needs to be passed to
 automatically once `run_floor_profile()` (directly, or via `run_dataset()`'s
 own default) has run for that dataset.
 
-**A known, deliberately unresolved discrepancy**: applying this same
-99.7%-target rule to the *full* 3sp genome panel (not the small worked
-example) resolves to floor **7**, not the floor of **8** the manuscript's
-existing full-panel analysis actually used (8 corresponds to a ~99.83%
-reduction there, closer to a 99.8% target). `run_floor_profile()` reports
-this kind of thing; it never silently revises an existing analysis to match.
-
 ## Every stage is receipt-gated
 
 Every stage (`build_stage1()`, `run_stage_A()`, each `run_stage_B()` engine,
@@ -579,31 +548,16 @@ non-alphanumeric characters collapsed to `_`, e.g.
 
 ## LDscnR version
 
-`R/00_config.R`'s `check_ldscnr()` pins `LDscnR` to a source-content hash
-(`LDSCNR_PIN$src_sha`), not a version number -- the package's `Version` field
-is not guaranteed to change on every commit, so a version check alone cannot
-catch a stale install, and a stale `LDscnR` install partway through a batch
-of hundreds of datasets is exactly the kind of thing worth catching loudly
-and immediately. `run_dataset()` calls it with its own default
-(`stop_on_fail = TRUE` unless `LDSCNR_LAX` is set) -- a batch stops on the
-FIRST call against a mismatched or dirty install, rather than warning and
-continuing through the rest against results that may not be reproducible.
-`run_batch.R` and the examples above use `devtools::load_all()`, not
-`library()`, matching every `LDscnR-paper` module -- `LDscnR` is still under
-active development (currently on `main`; the `outlier-scan` branch this was
-first pinned to was fast-forwarded into it and is now a stale ancestor, not
-a separate line -- `LDSCNR_PIN$branch` tracks whichever is current), and its
-working tree is sometimes concurrently edited by other sessions -- confirm
-any diff since the last pin is documentation/non-functional (or deliberately
-intended) before moving the pin, not just that `check_ldscnr()` currently
-passes. USE `devtools::load_all(LDSCNR_PIN$repo)`, NOT `library(LDscnR)`:
-the hash check itself always scans the repo's actual source tree regardless
-of how the package was attached, but `library(LDscnR)` attaches whatever is
-currently INSTALLED -- possibly a stale build with a different `Version` --
-so the check can report a clean pin match while the code actually executing
-in that session doesn't reflect it. If you update `LDscnR` and this check fails, either update
-`LDSCNR_PIN` in `R/00_config.R` (after confirming the change is intentional)
-or set `LDSCNR_LAX=1` to proceed anyway.
+`R/00_config.R` records the validated GitHub commit. `check_ldscnr()`
+checks the installed package's GitHub revision before a dataset runs; an
+older or non-GitHub installation stops the batch. Reinstall the revision in
+the quick start if that happens. A version number alone is not enough,
+because package code can change without a version bump.
+
+Developers who need an uninstalled local checkout can set
+`LDSCNR_DEV_LOAD_ALL=1` before `Rscript run_batch.R`; this uses
+`devtools::load_all()` and checks the local source hash instead. Ordinary
+users need neither a checkout of `LDscnR` nor `devtools`.
 
 ## Examples
 
@@ -628,14 +582,9 @@ method -- there is no plugin interface here for non-LDscnR outlier callers
 also use; those are a separate concern from this repo's job of batch-running
 LDscnR itself.
 
-## Known limitations (not yet fixed)
+## Known limitations
 
-An external audit of this repo (2026-09-26, uncommitted work at the time)
-found several correctness/robustness issues; the higher-severity ones
-(marker-to-unit/region assignment by coordinate instead of membership, the
-unstratified default permutation null, `config.R` overrides not executing at
-all, several receipt/provenance gaps) are fixed above. Two it raised are
-deliberately deferred, not silently dropped:
+Two limitations matter when planning larger analyses:
 
 - **Plotting at genome scale.** `ldm_manhattan()` plots every marker by
   default; fine on this repo's small worked examples, worth a point-

@@ -16,12 +16,14 @@ HERE <- dirname(sub("--file=", "", grep("--file=", commandArgs(trailingOnly = FA
 if (!length(HERE) || !nzchar(HERE)) HERE <- "."
 source(file.path(HERE, "R", "00_config.R"))   # defines LDSCNR_PIN, needed before loading LDscnR
 
-## devtools::load_all(), not library(): LDscnR is under active development on
-## the outlier-scan branch (same reasoning, and the same call, as every
-## LDscnR-paper module script -- see R/00_config.R's check_ldscnr() header),
-## so this always runs against the pinned repo's current source, not
-## whatever happens to be installed.
-suppressMessages(devtools::load_all(LDSCNR_PIN$repo, quiet = TRUE))
+## Use the installed GitHub package for public runs. Developers can opt into
+## their local checkout with LDSCNR_DEV_LOAD_ALL=1; check_ldscnr() validates
+## the package actually loaded in either mode before the first dataset runs.
+if (identical(Sys.getenv("LDSCNR_DEV_LOAD_ALL"), "1")) {
+  suppressMessages(devtools::load_all(LDSCNR_PIN$repo, quiet = TRUE))
+} else {
+  suppressPackageStartupMessages(library(LDscnR))
+}
 
 for (f in sort(list.files(file.path(HERE, "R"), pattern = "\\.R$", full.names = TRUE))) source(f)
 

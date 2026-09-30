@@ -73,16 +73,9 @@ DEFAULTS <- list(
 )
 
 ## ---- 2. LDscnR VERSION PIN ---------------------------------------------------
-## A content hash over R/*.R at the commit this repo was validated against,
-## not the package Version string alone: LDscnR is now versioned (0.9.0, was
-## 0.0.0.9000), but a version bump is not guaranteed for every commit, so the
-## hash remains the check that actually catches a stale install. A batch of
-## hundreds of datasets is exactly where that would be most expensive to
-## discover late. LDscnR-multi's own repo shares this working tree with other,
-## sometimes-concurrent sessions (module_manuscript_rho05, vignette
-## reorganisation) -- confirm any diff since the last pin is documentation/
-## non-functional (or deliberately intended) before moving this pin, not just
-## that check_ldscnr() currently passes.
+## Pin the validated GitHub commit. Installed packages are checked against
+## their remotes::install_github RemoteSha; local development sessions can
+## opt into the stricter source-tree hash check with LDSCNR_DEV_LOAD_ALL=1.
 LDSCNR_PIN <- list(
   repo    = path.expand("~/gitlab/LDscnR"),
   ## outlier-scan (the branch this was first pinned to) was fast-forwarded
@@ -90,11 +83,28 @@ LDSCNR_PIN <- list(
   ## itself is now a stale ancestor, not a separate line.
   branch  = "main",
   sha     = "2fc1d44a2552",
-  src_sha = "3060402d53eecdb2"
+  src_sha = "97b03ba5556d253b"
 )
 
 check_ldscnr <- function(stop_on_fail = !nzchar(Sys.getenv("LDSCNR_LAX"))) {
   v <- as.character(utils::packageVersion("LDscnR"))
+  if (!identical(Sys.getenv("LDSCNR_DEV_LOAD_ALL"), "1")) {
+    remote_sha <- utils::packageDescription("LDscnR", fields = "RemoteSha")
+    remote_repo <- utils::packageDescription("LDscnR", fields = "RemoteRepo")
+    remote_user <- utils::packageDescription("LDscnR", fields = "RemoteUsername")
+    ok <- !is.na(remote_sha) && startsWith(remote_sha, LDSCNR_PIN$sha) &&
+      identical(remote_repo, "LDscnR") && identical(remote_user, "genomeinsights")
+    cat(sprintf("  LDscnR %s | installed GitHub commit %s | expected %s\n",
+                v, if (is.na(remote_sha)) "unknown" else substr(remote_sha, 1, 12), LDSCNR_PIN$sha))
+    if (!ok) {
+      m <- paste("Installed LDscnR is not the validated GitHub revision.",
+                 "Install genomeinsights/LDscnR at commit", LDSCNR_PIN$sha,
+                 "with remotes::install_github(), or set LDSCNR_DEV_LOAD_ALL=1 for a validated local checkout.")
+      if (stop_on_fail) stop(m) else warning(m)
+    }
+    return(invisible(list(version = v, sha = remote_sha, src_sha = remote_sha, ok = ok,
+                          mode = "installed")))
+  }
   g <- function(...) tryCatch(system2("git", c("-C", LDSCNR_PIN$repo, ...),
                                       stdout = TRUE, stderr = FALSE), error = function(e) character())
   head_sha <- substr(paste(g("rev-parse", "HEAD"), collapse = ""), 1, 12)
@@ -117,7 +127,8 @@ check_ldscnr <- function(stop_on_fail = !nzchar(Sys.getenv("LDSCNR_LAX"))) {
                "Set LDSCNR_LAX=1 to proceed anyway.")
     if (stop_on_fail) stop(m) else warning(m)
   }
-  invisible(list(version = v, sha = head_sha, dirty = dirty, src_sha = cur, ok = ok))
+  invisible(list(version = v, sha = head_sha, dirty = dirty, src_sha = cur, ok = ok,
+                 mode = "source"))
 }
 
 ## ---- 3. RECEIPT MACHINERY -----------------------------------------------------
