@@ -1,33 +1,33 @@
 ## =============================================================================
 ## LDscnR-multi/R/11_floor_profile.R
 ##
-## A LIGHTWEIGHT, OBSERVED-ONLY size_floor SENSITIVITY CHECK -- deliberately
-## separate from run_floor_sweep() (R/09_floor_sweep.R), which reruns full
+## FLOOR-STABILITY LABELS FOR THE REPORTED REGIONS -- deliberately separate
+## from run_floor_sweep() (R/09_floor_sweep.R), which reruns full
 ## permutations at every floor and is not suitable for hundreds of datasets.
-## run_floor_profile() runs the pipeline's OWN, UNMODIFIED Stage A/B functions
-## exactly once with permutations (the "canonical" floor), and twice more
-## observed-only (no permutations, no rotation) at two side floors, all three
-## floors chosen from the dataset's ACTUAL Stage-1 cluster-size distribution
-## rather than from marker count alone.
+## run_floor_profile() runs the pipeline's own, unmodified Stage A/B once with
+## permutations at the REPORTED floor (cfg$size_floor), and observed-only
+## passes (no permutations, no rotation) at two comparison floors. It never
+## changes the reported floor.
 ##
-## This does NOT change what `size_floor` means anywhere else in the repo:
-## resolve_config()'s own derivation (R/00_config.R), run_dataset(), and
-## run_floor_sweep() are all untouched. This is an additional, opt-in report,
-## not a redefinition -- "Keep the existing explicit size_floor option for
-## reproducibility and older analyses."
+## THE THREE FLOORS (PK, 2026-10-07): the reported floor is the dataset's own
+## size_floor -- by default the marker-density rule, round(markers per Mb /
+## 250), see resolve_config() -- and it is compared with HALF and TWICE that
+## floor (`factors`, default c(0.5, 2)). The low side may be 1 (singletons
+## included): it is a comparison floor only, never the reported one. This
+## replaces the earlier 99.5/99.7/99.9% test-reduction targets; on the LDscnR
+## paper's simulations the 0.5x/2x design gave reported-region precision of
+## ~0.2 (1/3), ~0.5 (2/3) and ~0.8 (3/3), and recovery at the LOWER floor was
+## the more informative check. grid.csv still records each floor's achieved
+## test-count reduction and marker coverage, as information only.
 ##
-## THE THREE FLOORS are chosen by ACHIEVED TEST-COUNT REDUCTION, not a fixed
-## rule: for candidate integer floor f, reduction(f) = 1 - (number of Stage-1
-## clusters with n_loci >= f) / (number of assayed markers) -- the fraction of
-## per-marker tests that clustering-plus-floor avoids running at all. Targets
-## default to 99.5% / 99.7% / 99.9%; the middle one (99.7%) is canonical --
-## the ONLY floor that gets the structure-aware permutation null and Stage-2
-## rotation test. Verified directly against real cluster-size data: 99.7%
-## resolves to floor 8 on examples/3sp_chr1_chr4, floor 12 on
-## examples/9sp_chr19_chr20, and floor 7 on the full 3sp panel
-## (LDscnR-paper/module_3sp) -- the last of which is NOT the manuscript's own
-## floor of 8 (closer to a 99.8% target there). This function reports that
-## kind of discrepancy; it never silently revises anything upstream of it.
+## COST: the reported floor runs Stage A/B exactly as run_dataset() always
+## has (permutations, rotation). The consensus ("unit") arm is fitted ONCE
+## more, observed only, at the low floor; the high floor's units are a
+## subset of the low floor's and each unit's EMMAX p-value does not depend on
+## which other units are tested, so the high floor reuses those p-values
+## (selected by core_snp) and only BH + Stage-2 assembly are redone. The
+## "simes" arm reuses the shared, floor-independent marker scan at every
+## floor. Neither side floor gets a permutation null.
 ##
 ## REGIONS ARE MATCHED ACROSS FLOORS BY STAGE-1 CLUSTER IDENTITY, NOT SPAN
 ## OVERLAP: a unit's own `unit_id` is a position index into that floor's own
@@ -44,41 +44,34 @@
 ## Achieved test-count reduction for one candidate integer floor.
 .floor_reduction <- function(n_loci, floor, n_markers) 1 - sum(n_loci >= floor) / n_markers
 
-## For each target reduction, the integer floor whose ACHIEVED reduction is
-## closest. Ties (only possible when no cluster has the exact size that would
-## separate two candidate floors) are broken toward the LARGER floor --
-## consistent with this pipeline's existing "exclude the marginal case"
-## philosophy (e.g. the size_floor >= 2 hard minimum, R/00_config.R).
-## @return data.table(target, floor, achieved_reduction, n_units_tested,
-##   marker_coverage), one row per target -- floors are NOT deduplicated here;
-##   run_floor_profile() only runs Stage A/B once per DISTINCT floor value,
-##   but every target's own row is preserved so a repeat is visible, not hidden.
-.resolve_floor_targets <- function(clusters, n_markers, targets) {
+## The three profile floors for reported floor `canon`: low = max(1,
+## round(factors[1] * canon)), high = round(factors[2] * canon).
+## @return data.table(role, floor, achieved_reduction, n_units_tested,
+##   marker_coverage), one row per role (low/reported/high).
+.profile_floors <- function(clusters, n_markers, canon, factors = c(0.5, 2)) {
   clusters <- data.table::as.data.table(clusters)
   nl <- if ("n_loci" %in% names(clusters)) clusters$n_loci else clusters$n_snps
-  max_floor <- max(nl)
-  floors <- seq_len(max_floor)
-  n_units <- vapply(floors, function(f) sum(nl >= f), 0L)
-  reduction <- 1 - n_units / n_markers
-  coverage <- vapply(floors, function(f) sum(nl[nl >= f]) / n_markers, 0)
-
-  data.table::rbindlist(lapply(targets, function(t) {
-    d <- abs(reduction - t)
-    floor <- max(floors[d == min(d)])   # tie-break: larger floor
-    data.table::data.table(target = t, floor = floor,
-                           achieved_reduction = reduction[floor],
-                           n_units_tested = n_units[floor],
-                           marker_coverage = coverage[floor])
-  }))
+  fl <- c(max(1L, as.integer(round(factors[1] * canon))), as.integer(canon),
+          as.integer(round(factors[2] * canon)))
+  if (anyDuplicated(fl)) stop("floor profile: low/reported/high floors must differ, got ", paste(fl, collapse = "/"))
+  data.table::data.table(role = c("low", "reported", "high"), floor = fl,
+                         achieved_reduction = vapply(fl, function(f) .floor_reduction(nl, f, n_markers), 0),
+                         n_units_tested = vapply(fl, function(f) sum(nl >= f), 0L),
+                         marker_coverage = vapply(fl, function(f) sum(nl[nl >= f]) / n_markers, 0))
 }
 
 ## Stable Stage-1 cluster identity for a set of unit_ids AT A GIVEN FLOOR --
 ## see file header for why unit_id itself isn't comparable across floors.
-.unit_core_snp <- function(stage1_clusters, floor, unit_ids) {
-  stage1_clusters <- data.table::as.data.table(stage1_clusters)
-  nl <- if ("n_loci" %in% names(stage1_clusters)) stage1_clusters$n_loci else stage1_clusters$n_snps
-  cl_f <- stage1_clusters[nl >= floor]
-  cl_f$core_snp[unit_ids]
+## unit_id VALUES (as carried by test$units and snp_results) are row indices
+## into the size-filtered cluster table: .ld_outlier_units() assigns unit_id =
+## cluster-table row, then sorts its rows by position. So index the filtered
+## cluster table by the unit_id value -- never by row position in
+## .ld_outlier_units() output (that is the order of p-value vectors and unit
+## matrices, used separately below).
+.unit_core_snp <- function(stage1, map, floor, unit_ids) {
+  cl <- data.table::as.data.table(stage1$clusters)
+  nl <- if ("n_loci" %in% names(cl)) cl$n_loci else cl$n_snps
+  cl[nl >= floor]$core_snp[unit_ids]
 }
 
 ## Canonical-region stability table for one statistic ("unit"/"simes").
@@ -87,12 +80,12 @@
 ## CANONICAL region (never per side-floor-only region -- this profile is
 ## about how robust the PRIMARY, reported findings are, not a census of every
 ## floor's own discoveries).
-.floor_stability_table <- function(snp_results_by_floor, canon_floor, side_floors, stage1_clusters) {
+.floor_stability_table <- function(snp_results_by_floor, canon_floor, side_floors, stage1, map) {
   canon_sr <- snp_results_by_floor[[as.character(canon_floor)]]
   if (is.null(canon_sr) || !any(!is.na(canon_sr$region_id))) return(data.table::data.table())
 
   canon_units <- unique(canon_sr[!is.na(region_id), .(unit_id, region_id, Chr)])
-  canon_units[, core_snp := .unit_core_snp(stage1_clusters, canon_floor, unit_id)]
+  canon_units[, core_snp := .unit_core_snp(stage1, map, canon_floor, unit_id)]
   spans <- canon_sr[!is.na(region_id), .(from = min(Pos), to = max(Pos)), by = .(region_id, Chr)]
 
   ## Per side floor: significant units' stable cluster identity, joined to
@@ -104,7 +97,7 @@
     if (is.null(sr)) return(NULL)
     sig <- unique(sr[!is.na(unit_id) & significant == TRUE, .(unit_id, region_id)])
     if (!nrow(sig)) return(NULL)
-    sig[, core_snp := .unit_core_snp(stage1_clusters, fl, unit_id)]
+    sig[, core_snp := .unit_core_snp(stage1, map, fl, unit_id)]
     reg_spans <- sr[!is.na(region_id), .(from = min(Pos), to = max(Pos)), by = region_id]
     sig[reg_spans, on = "region_id", `:=`(side_from = i.from, side_to = i.to)]
     sig
@@ -151,151 +144,141 @@
 }
 
 ## @param dataset_dir Path to one dataset folder (must have input/phenotype.rds).
-## @param targets Reduction targets; the pipeline's own Stage A/B (with
-##   permutations and, if given, ld_region_rotation()) runs ONLY at
-##   `canonical_target`. The other two run observed-only: a fast, per-floor
-##   EMMAX-consensus scan and Stage-2 assembly, but no permutation null, no
-##   rotation test -- see run_stage_A(permute=)/run_stage_B(observed_only=).
-## @param canonical_target Must be one of `targets`.
-## @param cfg Resolved config (its OWN `size_floor` is ignored here --
-##   every floor this function tests comes from `targets`, not from
-##   resolve_config()'s derivation or an explicit override in it. Other
-##   fields -- statistics, grm_method, b_unit, b_simes, alpha, assembly,
-##   score_threshold, distance_threshold, gap, n_rotations, rotation_scheme,
-##   seed, cores -- are used as given).
-## @param annotation,chrom_lengths Passed to the CANONICAL floor's
-##   run_stage_B() calls only (ld_region_rotation() is a canonical-only,
+## @param cfg Resolved config; `cfg$size_floor` is the REPORTED floor (the
+##   marker-density rule unless set explicitly). Other fields -- statistics,
+##   grm_method, b_unit, b_simes, alpha, assembly, score_threshold,
+##   distance_threshold, gap, n_rotations, rotation_scheme, seed, cores --
+##   are used as given.
+## @param factors Multipliers for the low and high comparison floors
+##   (default half and twice the reported floor).
+## @param annotation,chrom_lengths Passed to the REPORTED floor's
+##   run_stage_B() calls only (ld_region_rotation() is a reported-floor-only,
 ##   structure-aware analysis, same as the permutation null).
-## @param canonical_unsuffixed FALSE (default) keeps EVERY floor -- canonical
-##   included -- at its own `_floor<N>`-suffixed output paths, never touching
-##   a dataset's existing default-floor results; a standalone
+## @param canonical_unsuffixed FALSE (default) keeps EVERY floor -- the
+##   reported one included -- at its own `_floor<N>`-suffixed output paths,
+##   never touching a dataset's existing results; a standalone
 ##   run_floor_profile() call is always safe to run alongside whatever else
-##   the dataset folder already has. TRUE writes the CANONICAL floor's Stage
+##   the dataset folder already has. TRUE writes the REPORTED floor's Stage
 ##   A/B to the traditional UNSUFFIXED paths (output/pvalues/emmax_unit/,
 ##   output/stageB_emmax_unit/, ...) instead -- used by run_dataset()'s own
-##   internal call, where the canonical floor IS now that dataset's primary,
-##   reported result (see run_dataset()'s own header for why). The two side
-##   floors stay `_floor<N>`-suffixed either way.
+##   internal call. The two comparison floors stay `_floor<N>`-suffixed.
 ## @param force Rebuild every floor's Stage A/B even if their receipts are current.
 ## @return list(grid, canonical_floor, floors, regions = list(unit=, simes=),
 ##   summary, out_dir).
-run_floor_profile <- function(dataset_dir, targets = c(0.995, 0.997, 0.999),
-                              canonical_target = 0.997, cfg = resolve_config(dataset_dir),
+run_floor_profile <- function(dataset_dir, cfg = resolve_config(dataset_dir), factors = c(0.5, 2),
                               annotation = NULL, chrom_lengths = NULL,
                               canonical_unsuffixed = FALSE, force = FALSE) {
   if (!file.exists(file.path(dataset_dir, "input", "phenotype.rds")))
     stop("run_floor_profile() needs input/phenotype.rds (Stage A must be able to run).")
-  if (!(canonical_target %in% targets))
-    stop("`canonical_target` (", canonical_target, ") must be one of `targets` (",
-         paste(targets, collapse = ", "), ").")
 
   ## force NOT forwarded here -- same reason run_stage_A()/run_stage_B()/
-  ## check_structure_alignment() never forward theirs either (and the exact
-  ## bug report_ld_decay() had until it was fixed, R/06_run_dataset.R's own
-  ## header): when called from run_dataset(), stage1's receipt was JUST
-  ## written by that function's own build_stage1(force = force) call moments
-  ## earlier, so forwarding `force` here would force a full, expensive stage1
-  ## rebuild a SECOND time for nothing. build_stage1()'s own staleness check
-  ## still rebuilds correctly if anything upstream genuinely changed.
+  ## check_structure_alignment() never forward theirs either: when called
+  ## from run_dataset(), stage1's receipt was JUST written by that function's
+  ## own build_stage1(force = force) call moments earlier.
   s1 <- build_stage1(dataset_dir, cfg)
-  grid <- .resolve_floor_targets(s1$stage1$clusters, nrow(s1$map), targets)
-  grid[, is_canonical := target == canonical_target]
+  canon_floor <- as.integer(cfg$size_floor)
+  grid <- .profile_floors(s1$stage1$clusters, nrow(s1$map), canon_floor, factors)
+  low_floor <- grid$floor[grid$role == "low"]; high_floor <- grid$floor[grid$role == "high"]
+  side_floors <- c(low_floor, high_floor)
 
   out_dir <- file.path(dataset_dir, "output", "floor_profile")
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
   data.table::fwrite(grid, file.path(out_dir, "grid.csv"))
-
-  canon_floor <- grid$floor[grid$is_canonical]
-  distinct_floors <- unique(grid$floor)
-  side_floors <- setdiff(distinct_floors, canon_floor)
-  say("=== %s: floor profile -- targets %s -> floors %s (canonical = %d) ===\n",
-      basename(dataset_dir), paste(sprintf("%.1f%%", 100 * targets), collapse = ", "),
-      paste(distinct_floors, collapse = ","), canon_floor)
-  if (length(distinct_floors) < length(targets))
-    say("    note: %d target(s) share a floor with another -- reported once, not rerun.\n",
-        length(targets) - length(distinct_floors))
+  say("=== %s: floor profile -- floors %d / %d (reported) / %d ===\n",
+      basename(dataset_dir), low_floor, canon_floor, high_floor)
 
   snp_results_by_floor <- list(unit = list(), simes = list())
   test_by_floor <- list(unit = list(), simes = list())
+  canon_suffix <- if (canonical_unsuffixed) "" else sprintf("_floor%d", canon_floor)
+
+  ## ---- reported floor: the full Stage A/B, unchanged -----------------------
+  say("\n--- floor = %d (reported) ---\n", canon_floor)
+  cfg_c <- utils::modifyList(cfg, list(size_floor = canon_floor))
+  if ("unit" %in% cfg$statistics) {
+    run_stage_A(dataset_dir, utils::modifyList(cfg_c, list(statistics = "unit")),
+               engine_suffix = canon_suffix, permute = TRUE, force = force)
+    r <- run_stage_B(dataset_dir, paste0("emmax_unit", canon_suffix), statistic = "unit", cfg = cfg_c,
+                     annotation = annotation, chrom_lengths = chrom_lengths, force = force)
+    test_by_floor$unit[[as.character(canon_floor)]] <- r$test
+    snp_results_by_floor$unit[[as.character(canon_floor)]] <- r$snp_results
+  }
+  simes_dir <- file.path(dataset_dir, "output", "pvalues", "emmax_simes")
   simes_p_obs <- NULL
+  if ("simes" %in% cfg$statistics) {
+    ## The shared marker scan's permutations are restricted to markers in
+    ## clusters clearing simes_floor; the reported floor's permutation null
+    ## is the only one needed, so simes_floor stays at the reported floor.
+    run_stage_A(dataset_dir, utils::modifyList(cfg_c, list(statistics = "simes")),
+               simes_floor = canon_floor, force = force)
+    simes_p_obs <- readRDS(file.path(simes_dir, "p_obs.rds"))
+    ## p_obs/p_perm_compact passed explicitly: run_stage_A()'s "simes" arm
+    ## always writes to the UNSUFFIXED emmax_simes/ directory, so a
+    ## floor-suffixed Stage B engine name would never find it on its own.
+    r <- run_stage_B(dataset_dir, paste0("emmax_simes", canon_suffix), p_obs = simes_p_obs,
+                     p_perm_compact = readRDS(file.path(simes_dir, "p_perm_compact.rds")),
+                     statistic = "simes", cfg = cfg_c,
+                     annotation = annotation, chrom_lengths = chrom_lengths, force = force)
+    test_by_floor$simes[[as.character(canon_floor)]] <- r$test
+    snp_results_by_floor$simes[[as.character(canon_floor)]] <- r$snp_results
+  }
 
-  ## Canonical first, always -- guarantees the "simes" arm's shared observed
-  ## scan (output/pvalues/emmax_simes/p_obs.rds) exists before any side floor
-  ## needs to reuse it directly.
-  ordered_floors <- c(canon_floor, side_floors)
-
-  for (fl in ordered_floors) {
-    is_canon <- identical(fl, canon_floor)
-    suffix <- if (is_canon && canonical_unsuffixed) "" else sprintf("_floor%d", fl)
-    cfg_fl <- utils::modifyList(cfg, list(size_floor = fl))
-    say("\n--- floor = %d (%s) ---\n", fl, if (is_canon) "canonical" else "observed-only")
-
-    if ("unit" %in% cfg$statistics) {
-      run_stage_A(dataset_dir, utils::modifyList(cfg_fl, list(statistics = "unit")),
-                 engine_suffix = suffix, permute = is_canon, force = force)
-      r <- run_stage_B(dataset_dir, paste0("emmax_unit", suffix), statistic = "unit", cfg = cfg_fl,
-                       annotation = if (is_canon) annotation else NULL,
-                       chrom_lengths = chrom_lengths, observed_only = !is_canon, force = force)
+  ## ---- comparison floors: observed only ------------------------------------
+  if ("unit" %in% cfg$statistics) {
+    ## One observed consensus fit at the LOW floor; the high floor is a
+    ## subset of its units (matched by core_snp, which is floor-independent).
+    low_suffix <- sprintf("_floor%d", low_floor)
+    cfg_l <- utils::modifyList(cfg, list(size_floor = low_floor))
+    say("\n--- floor = %d (comparison, observed only; also supplies floor %d) ---\n", low_floor, high_floor)
+    a_low <- run_stage_A(dataset_dir, utils::modifyList(cfg_l, list(statistics = "unit")),
+                         engine_suffix = low_suffix, permute = FALSE, force = force)$unit
+    ## p-value vectors follow .ld_outlier_units() ROW order (= ld_unit_matrix
+    ## column order), not unit_id values, so map positions through it.
+    core_low <- LDscnR:::.ld_outlier_units(s1$stage1, s1$map, low_floor)$core_snp
+    stopifnot(length(core_low) == length(a_low$p_obs))
+    p_by_core <- stats::setNames(as.numeric(a_low$p_obs), core_low)
+    for (fl in side_floors) {
+      cfg_fl <- utils::modifyList(cfg, list(size_floor = fl))
+      core_fl <- LDscnR:::.ld_outlier_units(s1$stage1, s1$map, fl)$core_snp
+      stopifnot("comparison floor units must be a subset of the low floor's" = all(core_fl %in% names(p_by_core)))
+      r <- run_stage_B(dataset_dir, sprintf("emmax_unit_floor%d", fl), p_obs = unname(p_by_core[core_fl]),
+                       p_display = as.numeric(a_low$p_obs_marker[s1$map$marker]),
+                       statistic = "unit", cfg = cfg_fl, observed_only = TRUE, force = force)
       test_by_floor$unit[[as.character(fl)]] <- r$test
       snp_results_by_floor$unit[[as.character(fl)]] <- r$snp_results
     }
-
-    if ("simes" %in% cfg$statistics) {
-      simes_dir <- file.path(dataset_dir, "output", "pvalues", "emmax_simes")
-      if (is_canon) {
-        run_stage_A(dataset_dir, utils::modifyList(cfg_fl, list(statistics = "simes")),
-                   simes_floor = fl, force = force)
-        simes_p_obs <- readRDS(file.path(simes_dir, "p_obs.rds"))
-        ## p_obs/p_perm_compact passed explicitly, not left to run_stage_B()'s
-        ## own auto-resolution: that logic looks for output/pvalues/<engine>/,
-        ## using the STAGE B engine NAME given below -- but run_stage_A()'s
-        ## "simes" arm always writes to the UNSUFFIXED emmax_simes/ directory
-        ## regardless of engine_suffix (its observed scan is floor-independent
-        ## and deliberately shared), so a floor-suffixed Stage B engine name
-        ## here would never find it (exactly the mismatch this fixed after
-        ## first hitting it directly on this example).
-        r <- run_stage_B(dataset_dir, paste0("emmax_simes", suffix), p_obs = simes_p_obs,
-                         p_perm_compact = readRDS(file.path(simes_dir, "p_perm_compact.rds")),
-                         statistic = "simes", cfg = cfg_fl,
-                         annotation = annotation, chrom_lengths = chrom_lengths, force = force)
-      } else {
-        ## Reused directly, not routed back through run_stage_A(): that
-        ## arm's observed scan is floor-independent and already on disk from
-        ## the canonical pass above -- see file header for why this sidesteps
-        ## run_stage_A()'s simes receipt (keyed on simes_floor) entirely
-        ## rather than entangling it with an unrelated "observed_only" idea.
-        r <- run_stage_B(dataset_dir, paste0("emmax_simes", suffix), p_obs = simes_p_obs,
-                         statistic = "simes", cfg = cfg_fl, observed_only = TRUE, force = force)
-      }
+  }
+  if ("simes" %in% cfg$statistics) {
+    for (fl in side_floors) {
+      say("\n--- floor = %d (comparison, observed only, simes) ---\n", fl)
+      r <- run_stage_B(dataset_dir, sprintf("emmax_simes_floor%d", fl), p_obs = simes_p_obs,
+                       statistic = "simes", cfg = utils::modifyList(cfg, list(size_floor = fl)),
+                       observed_only = TRUE, force = force)
       test_by_floor$simes[[as.character(fl)]] <- r$test
       snp_results_by_floor$simes[[as.character(fl)]] <- r$snp_results
     }
   }
 
-  ## ---- canonical-region stability tables --------------------------------
+  ## ---- reported-region stability tables -------------------------------------
   regions <- list()
   summary_rows <- list()
   for (stat in intersect(c("unit", "simes"), cfg$statistics)) {
-    tab <- .floor_stability_table(snp_results_by_floor[[stat]], canon_floor, side_floors, s1$stage1$clusters)
+    tab <- .floor_stability_table(snp_results_by_floor[[stat]], canon_floor, side_floors, s1$stage1, s1$map)
     regions[[stat]] <- tab
     data.table::fwrite(tab, file.path(out_dir, sprintf("canonical_regions_%s.csv", stat)))
-
     canon_test <- test_by_floor[[stat]][[as.character(canon_floor)]]
-    row <- data.table::data.table(method = stat)
-    for (i in seq_len(nrow(grid))) {
-      tgt <- round(grid$target[i] * 1000)
-      data.table::set(row, j = sprintf("floor_%03d", tgt), value = grid$floor[i])
-      data.table::set(row, j = sprintf("reduction_%03d", tgt), value = grid$achieved_reduction[i])
-    }
-    row[, `:=`(n_units_tested_canonical = nrow(canon_test$units),
-              n_significant_canonical = sum(canon_test$units$significant),
-              n_regions_canonical = nrow(canon_test$regions))]
-    summary_rows[[stat]] <- row
+    tiers <- if (nrow(tab)) table(factor(tab$n_ticks, levels = 1:3)) else c(0L, 0L, 0L)
+    summary_rows[[stat]] <- data.table::data.table(
+      method = stat, floor_low = low_floor, floor = canon_floor, floor_high = high_floor,
+      reduction_low = grid$achieved_reduction[1], reduction = grid$achieved_reduction[2],
+      reduction_high = grid$achieved_reduction[3],
+      n_units_tested = nrow(canon_test$units), n_significant = sum(canon_test$units$significant),
+      n_regions = nrow(canon_test$regions),
+      n_tier_1 = as.integer(tiers[1]), n_tier_2 = as.integer(tiers[2]), n_tier_3 = as.integer(tiers[3]))
   }
   summary <- data.table::rbindlist(summary_rows, fill = TRUE)
   data.table::fwrite(summary, file.path(out_dir, "summary.csv"))
   say("\nwrote %s\n", out_dir)
 
-  list(grid = grid, canonical_floor = canon_floor, floors = distinct_floors,
+  list(grid = grid, canonical_floor = canon_floor, floors = grid$floor,
       regions = regions, summary = summary, out_dir = out_dir)
 }

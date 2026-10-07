@@ -16,18 +16,11 @@
 ## Every step checks its own receipt first (see R/00_config.R), so calling
 ## this again on an unchanged dataset is a no-op walk over receipts.
 ##
-## WHY THE FLOOR PROFILE'S CANONICAL FLOOR IS NOW THIS FUNCTION'S OWN
-## `size_floor`, NOT `cfg`'s own derivation: run_floor_profile()
-## (R/11_floor_profile.R) picks size_floor by an actual, verified property --
-## the test-count reduction its own Stage-1 clustering achieves -- while
-## resolve_config()'s own default is a marker-count heuristic with no such
-## grounding. Once the floor profile runs anyway (cheap: the two side floors
-## are observed-only, no permutations -- see that file's header), reporting
-## results from a DIFFERENT, unrelated floor alongside it would be confusing,
-## not merely redundant. `cfg$size_floor` (whatever resolve_config() gave) is
-## overridden to the floor profile's own canonical floor before Stage A/B run
-## -- resolve_config() and run_floor_sweep() are both untouched; only THIS
-## function's own default reporting floor changes when floor_profile = TRUE.
+## THE REPORTED FLOOR is `cfg$size_floor` -- the marker-density rule
+## (resolve_config(), R/00_config.R) unless set explicitly. The floor profile
+## (R/11_floor_profile.R) no longer chooses or overrides it: it runs the
+## reported floor's full Stage A/B and adds observed-only comparison floors at
+## half and twice that floor, labelling each reported region 1/3, 2/3 or 3/3.
 ## =============================================================================
 
 ## @param dataset_dir Path to one dataset folder.
@@ -38,13 +31,10 @@
 ## @param annotation,chrom_lengths Optional, passed through to every
 ##   run_stage_B() call (ld_region_rotation()) and to the floor profile's own
 ##   canonical-floor call.
-## @param floor_profile TRUE (default) runs run_floor_profile() and adopts
-##   its canonical (99.7%-target) floor as `cfg$size_floor` for this call's
-##   own Stage A/B and manhattan figures -- see the file header. FALSE keeps
-##   `cfg$size_floor` exactly as resolve_config() gave it (today's
-##   behaviour), and skips the floor profile entirely.
-## @param floor_profile_targets,floor_profile_canonical_target Passed through
-##   to run_floor_profile() when `floor_profile = TRUE`.
+## @param floor_profile TRUE (default) runs run_floor_profile(): stability
+##   labels for the reported regions from comparison floors at half and twice
+##   `cfg$size_floor`. FALSE skips it. The reported floor is the same either way.
+## @param floor_profile_factors Passed to run_floor_profile() as `factors`.
 ## @param plot Write output/figures/manhattan.{png,pdf} (q-value) and
 ##   output/figures/manhattan_ld_w.{png,pdf} (same panels/layout/colouring,
 ##   ld_w_095 on the y-axis instead) via ldm_manhattan().
@@ -53,8 +43,7 @@
 ##   (named by engine), figure, figure_ld_w).
 run_dataset <- function(dataset_dir, engines = NULL, cfg = resolve_config(dataset_dir),
                         annotation = NULL, chrom_lengths = NULL,
-                        floor_profile = TRUE, floor_profile_targets = c(0.995, 0.997, 0.999),
-                        floor_profile_canonical_target = 0.997,
+                        floor_profile = TRUE, floor_profile_factors = c(0.5, 2),
                         plot = TRUE, force = FALSE) {
   say("=== %s ===\n", basename(dataset_dir))
   ## check_ldscnr()'s own default (stop_on_fail = TRUE unless LDSCNR_LAX is
@@ -90,19 +79,14 @@ run_dataset <- function(dataset_dir, engines = NULL, cfg = resolve_config(datase
   stageA <- NULL
   if (has_pheno) {
     if (isTRUE(floor_profile)) {
-      fp <- run_floor_profile(dataset_dir, targets = floor_profile_targets,
-                              canonical_target = floor_profile_canonical_target, cfg = cfg,
+      fp <- run_floor_profile(dataset_dir, cfg = cfg, factors = floor_profile_factors,
                               annotation = annotation, chrom_lengths = chrom_lengths,
                               canonical_unsuffixed = TRUE, force = force)
-      ## Every call below in this function now sees the floor profile's own
-      ## canonical floor, not resolve_config()'s -- see file header. The
-      ## run_stage_A()/run_stage_B() calls that follow just hit the receipt
-      ## the floor profile's own canonical-floor pass (canonical_unsuffixed =
-      ## TRUE, above) already wrote at the standard unsuffixed paths; they are
-      ## not redundant work, just this function's own return value/API shape.
-      cfg <- utils::modifyList(cfg, list(size_floor = fp$canonical_floor))
-      say("    [floor profile] canonical size_floor = %d (%.1f%% target)\n",
-          fp$canonical_floor, 100 * floor_profile_canonical_target)
+      ## The run_stage_A()/run_stage_B() calls that follow just hit the
+      ## receipts the floor profile's reported-floor pass (canonical_unsuffixed
+      ## = TRUE) already wrote at the standard unsuffixed paths.
+      say("    [floor profile] reported size_floor = %d; comparison floors %d and %d\n",
+          fp$canonical_floor, fp$floors[1], fp$floors[3])
     }
     stageA <- run_stage_A(dataset_dir, cfg, force = force)
   } else {

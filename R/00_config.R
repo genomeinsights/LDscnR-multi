@@ -59,7 +59,7 @@ DEFAULTS <- list(
   ## see resolve_config()'s DERIVED SIZE_FLOOR section below. Set to a number
   ## in DEFAULTS or a dataset's input/config.R to pin it instead.
   size_floor           = NULL,
-  size_floor_per_markers = 1e5,   # 1 unit of floor per this many assayed markers
+  size_floor_markers_per_mb = 250, # 1 unit of floor per this many markers per Mb of assayed sequence
   alpha                = 0.05,
   assembly              = "stage2_discovered",  # or "physical"
   score_threshold       = 0.80,
@@ -234,23 +234,27 @@ resolve_config <- function(dataset_dir) {
   }
 
   ## ---- DERIVED SIZE_FLOOR ------------------------------------------------
-  ## 1 unit of floor per size_floor_per_markers assayed markers (default
-  ## 1e5): module_3sp's own SIZE_FLOOR = 8, hand-derived as "2x its median
-  ## stage-1 cluster size", was fitted to that panel's ~790,578 markers --
-  ## 790578 / 1e5 ~= 7.9 ~= 8, so this recovers that value on a full-size
-  ## panel from a rule rather than a per-panel judgement call. On a small
-  ## worked example (e.g. this repo's own two-chromosome subsets, ~120k
-  ## markers) it derives a SMALLER floor than a full dataset would get --
-  ## expected, not a bug: real use of this pipeline assumes full datasets,
-  ## and a subset's floor being smaller than the full panel's is just what
-  ## "fewer markers" means under this rule. Only runs when `size_floor`
-  ## wasn't set explicitly (DEFAULTS or a dataset's own config.R); reads
-  ## map.rds's row count rather than loading the full genotype matrix.
+  ## 1 unit of floor per size_floor_markers_per_mb markers per Mb of assayed
+  ## sequence (default 250): floor = round(marker density / 250), where
+  ## density = number of markers / summed per-chromosome span (max - min Pos,
+  ## in Mb). Using DENSITY rather than the raw marker count makes the floor
+  ## invariant to analysing a subset of chromosomes: the earlier count-based
+  ## rule (1 per 1e5 markers) gave floor 8 on the full ~790k-marker 3sp panel
+  ## but floor 2 on its two-chromosome example, where too few tests were
+  ## removed for any power gain. Density gives 8 on both (3sp ~2,080
+  ## markers/Mb), 12 on the 9sp panel (~2,960/Mb) and the hard minimum of 2
+  ## on the LDscnR paper's simulations (~250-320/Mb). Only runs when
+  ## `size_floor` wasn't set explicitly (DEFAULTS or a dataset's own
+  ## config.R); reads map.rds rather than loading the full genotype matrix.
   if (is.null(cfg$size_floor)) {
     map_f <- file.path(dataset_dir, "input", "map.rds")
-    n_markers <- if (file.exists(map_f)) nrow(readRDS(map_f)) else NA_integer_
-    cfg$size_floor <- if (is.na(n_markers)) 8L
-                      else round(n_markers / cfg$size_floor_per_markers)
+    dens <- if (file.exists(map_f)) {
+      m <- data.table::as.data.table(readRDS(map_f))
+      span_mb <- m[, .(mb = (max(Pos) - min(Pos)) / 1e6), by = Chr][, sum(mb)]
+      if (span_mb > 0) nrow(m) / span_mb else NA_real_
+    } else NA_real_
+    cfg$size_floor <- if (is.na(dens)) 8L
+                      else round(dens / cfg$size_floor_markers_per_mb)
   }
   ## Hard floor of 2, unconditionally -- a singleton "cluster" (size_floor =
   ## 1) is the single most effect-size-inflated, least reliable unit this

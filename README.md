@@ -25,9 +25,8 @@ Two stages, per dataset:
 
 Plus a flexible, multi-track Manhattan plot (`ldm_manhattan()`), a pre-scan
 diagnostic for phenotype/structure confounding (`check_structure_alignment()`),
-a full-permutation `size_floor` sensitivity sweep (`run_floor_sweep()`), a
-cheaper observed-only floor-profile alternative for batch use
-(`run_floor_profile()`), and a batch loop (`run_all()`) that isolates one
+a full-permutation `size_floor` sensitivity sweep (`run_floor_sweep()`),
+floor-stability labels for every reported region (`run_floor_profile()`), and a batch loop (`run_all()`) that isolates one
 dataset's failure from the rest and writes `summary.csv` +
 `alignment_summary.csv`.
 
@@ -212,13 +211,13 @@ two-marker case under the earlier approach, which never actually required
 Config precedence: `R/00_config.R`'s `DEFAULTS` < dataset `input/config.R` <
 an explicit `cfg =` argument at the call site.
 
-`size_floor` defaults to a DERIVED value -- 1 unit of floor per 1e5 assayed
-markers (`size_floor_per_markers` in `DEFAULTS`), recovering module_3sp's own
-hand-derived `SIZE_FLOOR = 8` on its ~790k-marker full panel from a rule
-rather than a per-panel judgement call. On this repo's own small worked
-examples (~120k markers) it derives a smaller floor than a full dataset
-would get -- expected, not a bug: real use of this pipeline assumes full
-datasets. Never below **2** regardless of that derivation, though, or of an
+`size_floor` defaults to a DERIVED value -- marker density divided by 250,
+i.e. 1 unit of floor per 250 markers per Mb of assayed sequence
+(`size_floor_markers_per_mb` in `DEFAULTS`), rounded. Density is the number
+of markers over the summed per-chromosome span in `map.rds`. Because it is a
+density rather than a count, a subset of chromosomes gets the same floor as
+the full panel: 8 on the ~790k-marker three-spined panel and on its
+two-chromosome example, 12 on the nine-spined panel. Never below **2** regardless of that derivation, though, or of an
 explicit override in `DEFAULTS`/a dataset's own `config.R`: a singleton
 cluster (`size_floor = 1`) is a single marker's own sampling noise with
 nothing to average it against, the single most effect-size-inflated unit
@@ -378,57 +377,37 @@ want the extra robustness check.
 | `n_significant` | How many of those were significant at `alpha`. |
 | `n_regions` | How many regions the significant units assembled into. |
 
-## Floor profile: a lightweight, observed-only sensitivity check
+## Floor profile: stability labels for the reported regions
 
-`run_floor_sweep()` above reruns full permutations at every floor it tests --
-fine for a one-off robustness check, not for hundreds of datasets.
-`run_floor_profile(dataset_dir, targets = c(0.995, 0.997, 0.999))` is a
-separate, cheaper alternative: it runs the pipeline's own, unmodified Stage
-A/B functions exactly once **with** permutations (the *canonical* floor), and
-twice more **observed-only** (no permutations, no `ld_region_rotation()`) at
-two side floors -- all three chosen from the dataset's actual Stage-1
-cluster-size distribution, not from marker count. This does not change what
-`size_floor` means in `resolve_config()`'s own derivation, or in
-`run_floor_sweep()` -- both are untouched.
+`run_floor_profile(dataset_dir, factors = c(0.5, 2))` labels every region
+reported at the dataset's floor (`cfg$size_floor`, by default the
+marker-density rule) by whether it is also found at **half** and at **twice**
+that floor: `"3/3"` (found at both), `"2/3"` (one) or `"1/3"` (neither). For
+the three-spined example (floor 8) the comparison floors are 4 and 16. The
+low floor may be 1 (singletons included); it is a comparison floor only,
+never the reported one.
 
 **`run_dataset()` calls this automatically (`floor_profile = TRUE` by
-default)** and adopts its canonical floor as `cfg$size_floor` for that call's
-own Stage A/B and manhattan figures, in place of `resolve_config()`'s own
-marker-count-based derivation -- the two side floors add only a fast,
-permutation-free scan each (see "How the three floors are chosen" below), so
-this is cheap even at full-genome scale (this session's own full-genome
-timing: canonical Stage A/B already ran in ~10s per call; the two extra
-observed-only passes are a small fraction of that, since they skip the
-permutation loop entirely). Pass `floor_profile = FALSE` to
-`run_dataset()` to keep `resolve_config()`'s own floor unchanged, exactly as
-before this feature existed. `run_floor_sweep()` and a direct
-`run_floor_profile()` call are both unaffected by this default either way.
+default).** It never changes the reported floor; pass `floor_profile =
+FALSE` to skip the labels.
 
-**How the three floors are chosen.** For a candidate integer floor `f`,
-`reduction(f) = 1 - (clusters with n_loci >= f) / (assayed markers)` -- the
-fraction of per-marker tests that clustering-plus-floor avoids running
-outright. For each target reduction, the floor whose achieved reduction is
-closest is selected (ties -- only possible when no cluster has the exact size
-that would separate two candidate floors -- broken toward the **larger**
-floor). Verified against the real cluster-size data: 99.7% resolves to floor
-8 on `examples/3sp_chr1_chr4`, floor 12 on `examples/9sp_chr19_chr20`. If two
-targets resolve to the same integer floor, Stage A/B for it only ever runs
-once -- both targets' rows in `grid.csv` still show it, honestly, rather than
-hiding the coincidence.
+**Why 0.5x and 2x.** In the LDscnR paper's simulations (600 runs with known
+causal variants), regions reported at the density floor had precision of
+about 0.2 when found at only that floor, 0.5 when also found at one
+comparison floor and 0.8 when found at both. Dropping 1/3 regions cost
+almost no recall, and recovery at the **lower** floor -- where the BH burden
+is larger -- was the more informative check. In the three-spined panel, the
+EcoPeak enrichment was carried by regions recovered at a second floor.
 
-**Only the middle (99.7%, "canonical") floor gets the full treatment**:
-permutations, `ld_outlier_perm()`, and (if `annotation` is given)
-`ld_region_rotation()` -- the structure-aware null this pipeline's primary
-region reporting relies on. The two side floors get a fast, floor-specific
-**observed** EMMAX-consensus scan and Stage-2 assembly (`run_stage_A(permute
-= FALSE)`), and `ld_outlier_test()`'s own BH correction and assembly, but
-never a permutation-based test (`run_stage_B(observed_only = TRUE)`) -- that
-mode does not merely skip using a cached permutation file if one is missing,
-it never attempts to auto-load one from disk at all, specifically so a
-canonical floor's cached `p_perm`/`p_perm_compact.rds` can never be picked up
-by an observed-only call by accident. The "simes" arm's genome-wide observed
-marker scan is floor-independent and is reused directly from the canonical
-floor's own run rather than recomputed.
+**Cost.** The reported floor runs Stage A/B exactly as before, with
+permutations and (if `annotation` is given) `ld_region_rotation()`. The
+comparison floors are observed only (`run_stage_B(observed_only = TRUE)`,
+which never loads a cached permutation file): the consensus arm is fitted
+once more, at the low floor, and the high floor reuses those unit p-values
+for its subset of clusters -- a unit's EMMAX p-value does not depend on which
+other units are tested, so only BH correction and Stage-2 assembly are
+repeated. The "simes" arm reuses the floor-independent marker scan at every
+floor.
 
 **Regions are matched across floors by Stage-1 cluster identity, not by
 physical span overlap.** A unit's own `unit_id` is a position index into that
@@ -442,13 +421,14 @@ sanity check on a recovered hit.
 
 Four output files under `output/floor_profile/`:
 
-`grid.csv` -- one row per target: `target, floor, achieved_reduction,
-n_units_tested, marker_coverage, is_canonical`.
+`grid.csv` -- one row per floor: `role` (low/reported/high), `floor`,
+`achieved_reduction` (fraction of per-marker tests avoided),
+`n_units_tested`, `marker_coverage`.
 
-`summary.csv` -- one compact row per method (`unit`/`simes`): each target's
-`floor_<target*1000>`/`reduction_<target*1000>` (e.g. `floor_997`,
-`reduction_997`), plus the canonical floor's `n_units_tested_canonical`,
-`n_significant_canonical`, `n_regions_canonical`.
+`summary.csv` -- one compact row per method (`unit`/`simes`): `floor_low`,
+`floor`, `floor_high` and their `reduction_*`, the reported floor's
+`n_units_tested`, `n_significant`, `n_regions`, and the number of regions in
+each tier (`n_tier_1`, `n_tier_2`, `n_tier_3`).
 
 `canonical_regions_unit.csv`/`canonical_regions_simes.csv` -- one row per
 **canonical-floor** region (never a region found only at a side floor -- this
@@ -462,19 +442,15 @@ every floor's own discoveries):
 | `overlap_check_<floor>` | Secondary sanity check, only meaningful when the tick above is TRUE: does that side floor's own region (containing the recovered cluster) physically overlap this canonical region's span? Almost always TRUE; a FALSE here is a genuine anomaly worth a human look, not expected behaviour. |
 | `n_ticks`, `stability_tier` | How many of the 3 floors (canonical + 2 side) found this region -- `"3/3"`, `"2/3"`, or `"1/3"` (never `"0/3"`, since every row starts from a canonical, already-found region). |
 
-**This count is a descriptive robustness label, not a significance measure**
--- never a C-score, p-value, FDR estimate, or independent replication. Only
-the canonical floor's regions get the structure-aware permutation null; a
-"3/3" region has not been separately tested against a null at the other two
-floors, it has simply also cleared BH correction there. Claiming a 3/3 region
-is *statistically* more trustworthy than a 1/3 one would require repeating
-the full permutation-based ranking at all three floors -- exactly the cost
-this function exists to avoid for a batch of hundreds of datasets.
+**The tier is a robustness label, not a significance measure** -- never a
+p-value, FDR estimate or independent replication: every floor analyses the
+same data, and only the reported floor gets the structure-aware permutation
+null. Its meaning comes from the simulation calibration above, not from a
+test at each floor.
 
 `run_floor_profile()` itself is not wired into `run_all()`; a user wanting a
 multi-dataset profile calls it per dataset the same way `run_all()` calls
-`run_dataset()`, and `rbindlist()`s the returned `summary` tables. (Its
-*canonical floor*, though, is what `run_dataset()` uses by default -- see above.)
+`run_dataset()`, and `rbindlist()`s the returned `summary` tables.
 
 **Manhattan labels show the stability tier directly** (`ldm_manhattan()`,
 R/05_manhattan.R): whenever `output/floor_profile/canonical_regions_<statistic>.csv`
