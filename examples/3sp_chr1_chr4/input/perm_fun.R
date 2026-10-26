@@ -12,12 +12,7 @@
 population <- readRDS(file.path(.dataset_dir, "input", "population.rds"))
 structure_group <- readRDS(file.path(.dataset_dir, "input", "structure_group.rds"))
 
-perm_fun <- function(b, y) {
-  pop <- population[names(y)]
-  grp <- structure_group[names(y)]
-  pops <- unique(pop)
-  pop_group <- grp[match(pops, pop)]
-  y_pop <- as.numeric(y[match(pops, pop)])          # one value per population (constant within)
-  y_pop_shuf <- stats::ave(y_pop, pop_group, FUN = sample)   # shuffled within locality, at population resolution
-  as.numeric(y_pop_shuf[match(pop, pops)])          # broadcast back to individuals
-}
+## perm_within_groups() (R/01_dataset_io.R) visits populations and groups in
+## order of first appearance, so the same seed gives the same surrogate as the
+## manuscript modules' data.table shuffle.
+perm_fun <- function(b, y) perm_within_groups(y, population, structure_group)

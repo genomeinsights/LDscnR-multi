@@ -29,3 +29,6 @@ doc/*.aux
 doc/*.log
 doc/*.out
 doc/*.toc
+
+## manuscript/: reproduction datasets built from LDscnR-paper bundles (large)
+manuscript/data/

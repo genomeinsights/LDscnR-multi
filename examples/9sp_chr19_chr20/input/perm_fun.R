@@ -5,18 +5,13 @@
 ## constant within every population in this panel too, so the shuffle
 ## reassigns WHICH population gets which value, restricted to populations
 ## sharing the same lineage, never mixing values within a population.
-## Mirrors LDscnR-paper/module_9sp/R/03_EMMAX.R's within-lineage scheme
-## (population-level, not this repo's covariate-adjustment step -- LDscnR-
-## multi has no Covar mechanism; see R/03_stage_A_emmax.R).
+## Mirrors LDscnR-paper/module_9sp/R/03_EMMAX.R's perm_lineage(). The
+## surrogate is then residualised on input/covariate.rds (lineage) by Stage A,
+## exactly as the observed phenotype is.
 population <- readRDS(file.path(.dataset_dir, "input", "population.rds"))
 structure_group <- readRDS(file.path(.dataset_dir, "input", "structure_group.rds"))
 
-perm_fun <- function(b, y) {
-  pop <- population[names(y)]
-  grp <- structure_group[names(y)]
-  pops <- unique(pop)
-  pop_group <- grp[match(pops, pop)]
-  y_pop <- as.numeric(y[match(pops, pop)])
-  y_pop_shuf <- stats::ave(y_pop, pop_group, FUN = sample)
-  as.numeric(y_pop_shuf[match(pop, pops)])
-}
+## perm_within_groups() (R/01_dataset_io.R) visits populations and groups in
+## order of first appearance, so the same seed gives the same surrogate as the
+## manuscript modules' data.table shuffle.
+perm_fun <- function(b, y) perm_within_groups(y, population, structure_group)

@@ -22,32 +22,24 @@ suppressMessages({library(data.table); library(digest)})
 DEFAULTS <- list(
   ## stage1 clustering (genotype-only)
   cr_rho              = 0.5,      # ld_complexity_reduction rho
-  ## slide = 450, not compute_LD_decay()'s own default of 1000: `slide` sizes
-  ## the raw pairwise edge list (every SNP against its next `slide` SNPs, no
-  ## r2 floor) that both ld_complexity_reduction() and compute_ld_w() build
-  ## per chromosome -- at full-genome marker density, slide=1000 runs 4-5 GiB
-  ## PER CHROMOSOME, which is why el_data_folder is no longer used at all
-  ## (R/02_stage1_cluster.R) and every consumer rebuilds it on the fly
-  ## instead. 450 comes from a calibration run on the full 3sp genome (20
-  ## chromosomes, LDscnR-paper/module_3sp): a cheap max_SNPs_decay = 5000 scan
-  ## put the tool's own "suggested slide for rho = 0.99" at up to 397 SNPs
-  ## (Chr4, the chromosome carrying the ecotype-associated Eda region --
-  ## genuinely needs the most). A follow-up max_SNPs_decay sweep (5k/10k/
-  ## 20k/40k) at that slide showed the fitted decay rate `a` still rising at
-  ## every step, not yet converged -- but monotonically, EVERY chromosome,
-  ## always in the direction of a subsampled (sparser) fit reading a SLOWER
-  ## decay than the true one. A slower apparent decay implies a LARGER
-  ## required window, so the 5000-subsample estimate this 450 is based on is
-  ## systematically conservative (oversized), never undersized, relative to
-  ## the true full-density value -- confirmed directly on Chr17, whose true
-  ## marker count (34,714) is itself below the 40k sweep step, so its value
-  ## there already IS the unbiased full-density fit and still followed the
-  ## same direction. Safe to use without paying for a full, unsampled
-  ## calibration pass.
+  ## slide = 500, rho_targets = 0.99: the manuscript's own Stage-1 settings
+  ## (LDscnR-paper/module_3sp and module_9sp, R/00_config.R DECAY_ARGS), so a
+  ## default run reproduces the published analyses exactly. compute_LD_decay()'s
+  ## own default slide is 1000. `slide` sizes the raw pairwise edge list (every
+  ## SNP against its next `slide` SNPs, no r2 floor) that both
+  ## ld_complexity_reduction() and compute_ld_w() rebuild per chromosome from
+  ## the GDS (R/02_stage1_cluster.R), so memory and time scale with it. A
+  ## calibration on the full 3sp genome put the tool's suggested slide for
+  ## rho = 0.99 at up to 397 SNPs (Chr4), with the subsampled fit biased towards
+  ## a larger window, so 500 is comfortably sufficient; 450 (the previous
+  ## default) was the minimum from that calibration, not the published value.
+  ## rho_targets only sets which recommended windows are reported; it does not
+  ## change the decay fit. The fit is seeded with `seed` (below), the same
+  ## seed (1) the manuscript modules pass as SEEDS[["bundle"]].
   decay_args          = list(min_maf_decay = 0.1, q = 0.95, n_sub_bg = 5000,
                               n_win_decay = 20, overlap = 0.5, max_SNPs_decay = Inf,
                               prob_robust = 0.95, max_pairs = 5000, ld_method = "corr",
-                              n_strata = 20, slide = 450, cores = 1),
+                              n_strata = 20, slide = 500, rho_targets = 0.99, cores = 1),
   ## Stage A: EMMAX
   statistics          = c("unit", "simes"),   # which arm(s) to compute; either or both
   unit_repr           = "consensus_dosage",   # ld_unit_matrix() representation for the "unit" arm
@@ -82,8 +74,8 @@ LDSCNR_PIN <- list(
   ## into main and development has continued there since -- outlier-scan
   ## itself is now a stale ancestor, not a separate line.
   branch  = "main",
-  sha     = "2fc1d44a2552",
-  src_sha = "97b03ba5556d253b"
+  sha     = "24776194ce36",       # tag v0.9.1, the version cited in the manuscript
+  src_sha = "1fba54bf2928d007"
 )
 
 check_ldscnr <- function(stop_on_fail = !nzchar(Sys.getenv("LDSCNR_LAX"))) {

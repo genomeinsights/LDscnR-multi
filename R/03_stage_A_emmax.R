@@ -32,8 +32,11 @@
 ## Run permutation index `b` through `perm_fun` and `emmax_fast`, seeded the
 ## same way module_3sp's p_perm closures are (`set.seed(bb)` per draw) so a
 ## rerun with the same B reproduces the same surrogate matrix.
-.emmax_perm_matrix <- function(prep, y, perm_fun, B, cores = 1L) {
-  one <- function(b) { set.seed(b); emmax_fast(prep, perm_fun(b, y)) }
+## `y` is the RAW phenotype: perm_fun() permutes it and the surrogate is then
+## residualised on `covariate` (if any), exactly as the observed phenotype is
+## (adjust_phenotype(), R/01_dataset_io.R).
+.emmax_perm_matrix <- function(prep, y, perm_fun, B, cores = 1L, covariate = NULL) {
+  one <- function(b) { set.seed(b); emmax_fast(prep, adjust_phenotype(perm_fun(b, y), covariate)) }
   cols <- if (cores > 1L) parallel::mclapply(seq_len(B), one, mc.cores = cores) else lapply(seq_len(B), one)
   do.call(cbind, cols)
 }
@@ -82,6 +85,14 @@ run_stage_A <- function(dataset_dir, cfg = resolve_config(dataset_dir), force = 
   d  <- read_dataset(dataset_dir, need_phenotype = TRUE)
   perm_fun <- resolve_perm_fun(dataset_dir)
   GRM <- s1$GRM
+  ## Optional structure covariate (input/covariate.rds): the tested phenotype
+  ## is resid(lm(y ~ covariate)); permutations act on the raw phenotype and are
+  ## residualised the same way (see .emmax_perm_matrix()).
+  y_test <- adjust_phenotype(d$phenotype, d$covariate)
+  if (!is.null(d$covariate))
+    say("    [stage A] phenotype residualised on input/covariate.rds (%d groups, R^2 = %.3f)\n",
+        length(unique(d$covariate)),
+        summary(stats::lm(as.numeric(d$phenotype) ~ d$covariate))$r.squared)
 
   out <- list()
   ## Depends on cache/'s own receipt, not just the raw input files: without
@@ -97,6 +108,8 @@ run_stage_A <- function(dataset_dir, cfg = resolve_config(dataset_dir), force = 
                     receipt_path(file.path(dataset_dir, "cache")))
   perm_fun_file <- file.path(dataset_dir, "input", "perm_fun.R")
   if (file.exists(perm_fun_file)) stage_inputs <- c(stage_inputs, perm_fun_file)
+  covariate_file <- file.path(dataset_dir, "input", "covariate.rds")
+  if (file.exists(covariate_file)) stage_inputs <- c(stage_inputs, covariate_file)
 
   ## Memoised marker-level scan: built the first time either arm needs it,
   ## reused by the second so "unit" and "simes" never pay for it twice.
@@ -105,7 +118,7 @@ run_stage_A <- function(dataset_dir, cfg = resolve_config(dataset_dir), force = 
     function() {
       if (is.null(cache)) {
         prep <- emmax_setup(s1$genotypes, GRM)
-        p_obs <- emmax_fast(prep, d$phenotype)
+        p_obs <- emmax_fast(prep, y_test)
         names(p_obs) <- colnames(s1$genotypes)
         cache <<- list(prep = prep, p_obs = p_obs)
       }
@@ -124,8 +137,9 @@ run_stage_A <- function(dataset_dir, cfg = resolve_config(dataset_dir), force = 
       um <- ld_unit_matrix(s1$genotypes, s1$stage1, s1$map, size_floor = cfg$size_floor,
                            repr = cfg$unit_repr)
       prep <- emmax_setup(um, GRM)
-      p_obs <- emmax_fast(prep, d$phenotype)
-      p_perm <- if (permute) .emmax_perm_matrix(prep, d$phenotype, perm_fun, cfg$b_unit, cfg$cores) else NULL
+      p_obs <- emmax_fast(prep, y_test)
+      p_perm <- if (permute) .emmax_perm_matrix(prep, d$phenotype, perm_fun, cfg$b_unit, cfg$cores,
+                                                covariate = d$covariate) else NULL
       p_obs_marker <- .marker_scan()$p_obs   ## display-only companion; see file header
       dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
       saveRDS(p_obs, file.path(out_dir, "p_obs.rds"))
@@ -178,7 +192,8 @@ run_stage_A <- function(dataset_dir, cfg = resolve_config(dataset_dir), force = 
       ms <- .marker_scan()
       p_obs <- ms$p_obs
       prep_compact <- emmax_setup(s1$genotypes[, eligible, drop = FALSE], GRM)
-      p_perm_compact <- .emmax_perm_matrix(prep_compact, d$phenotype, perm_fun, cfg$b_simes, cfg$cores)
+      p_perm_compact <- .emmax_perm_matrix(prep_compact, d$phenotype, perm_fun, cfg$b_simes, cfg$cores,
+                                           covariate = d$covariate)
       rownames(p_perm_compact) <- eligible
       dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
       saveRDS(p_obs, file.path(out_dir, "p_obs.rds"))
