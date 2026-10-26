@@ -32,3 +32,5 @@ doc/*.toc
 
 ## manuscript/: reproduction datasets built from LDscnR-paper bundles (large)
 manuscript/data/
+doc/*.fdb_latexmk
+doc/*.fls

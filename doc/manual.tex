@@ -206,7 +206,7 @@ analyses run from local files. The validated revision is recorded in
 
 \begin{Verbatim}
 install.packages("remotes")               # once, if needed
-remotes::install_github("genomeinsights/LDscnR@2fc1d44a2552")
+remotes::install_github("genomeinsights/LDscnR@v0.9.1")
 library(LDscnR)
 \end{Verbatim}
 
@@ -312,6 +312,11 @@ that ties it into the pipeline.
   coarser sampling group (locality, lineage, \ldots). Defaults to
   \code{population.rds} when absent; this is the grouping a permutation is
   actually restricted within. \\
+\code{covariate.rds} & optional (Stage A) & Named vector, individual $\to$
+  a structure covariate such as lineage. When present, the phenotype is
+  replaced by \code{resid(lm(y ~ covariate))} before EMMAX, and every
+  permuted surrogate is residualised the same way after \code{perm_fun()},
+  as in the manuscript's nine-spined analysis. \\
 \code{config.R} & optional & Plain R assigning any \code{DEFAULTS} name from
   \code{R/00_config.R} (Section~\ref{sec:config-reference}) to override it
   for this dataset only, e.g.\ \code{cr_rho <- 0.35}. \\
@@ -335,7 +340,7 @@ never exists in the real data; this shuffle instead reassigns \emph{which}
 population gets which value, restricted to populations sharing the same
 locality:
 
-\VerbatimInput[firstline=12,lastline=23,fontsize=\tiny,frame=single]{../examples/3sp_chr1_chr4/input/perm_fun.R}
+\VerbatimInput[firstline=12,lastline=18,fontsize=\tiny,frame=single]{../examples/3sp_chr1_chr4/input/perm_fun.R}
 
 \subsubsection{What \code{genotypes.rds}/\code{map.rds}/\code{phenotype.rds} actually look like}
 
@@ -1091,12 +1096,11 @@ site.
 \endhead
 \code{cr_rho} & 0.5 & LD threshold for Stage-1 clustering
   (\code{ld_complexity_reduction()}). \\
-\bcode{decay\_args\$slide} & 450 & Window size (in SNPs) for the raw
-  pairwise edge list every LD computation builds per chromosome. Calibrated
-  down from \code{compute_LD_decay()}'s own default of 1000 specifically
-  to keep the on-the-fly rebuild (see \code{cache/}, Section~\ref{sec:dataset-contract})
-  small at full-genome marker density; verified not to move \code{ld_w}
-  meaningfully relative to a larger window. \\
+\bcode{decay\_args\$slide} & 500 & Window size (in SNPs) for the raw
+  pairwise edge list every LD computation builds per chromosome; the
+  manuscript's own setting (\code{compute_LD_decay()}'s default is 1000).
+  The edge list is rebuilt on the fly (see \code{cache/},
+  Section~\ref{sec:dataset-contract}), so memory and time scale with it. \\
 \bcode{decay\_args} (other fields) & see \code{R/00_config.R} & The
   remaining LD-decay fitting parameters (MAF filter, background-LD
   quantile, subsampling sizes, robust-fit probability, number of decay

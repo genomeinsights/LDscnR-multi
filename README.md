@@ -42,7 +42,7 @@ The same `run_dataset()` call works for one dataset; `run_all()` or
 [`doc/manual.pdf`](doc/manual.pdf).
 
 ```r
-remotes::install_github("genomeinsights/LDscnR@2fc1d44a2552") # once
+remotes::install_github("genomeinsights/LDscnR@v0.9.1") # once
 library(LDscnR)
 for (f in sort(list.files("R", pattern = "\\.R$", full.names = TRUE))) source(f)
 
@@ -107,6 +107,13 @@ Rscript run_batch.R examples/                 # every subfolder with an input/
     structure_group.rds       optional. Named vector, individual -> coarser
                        sampling group (locality/lineage/etc). Defaults to
                        population.rds when absent.
+    covariate.rds             optional (Stage A). Named vector, individual ->
+                       structure covariate (e.g. lineage). When present, the
+                       phenotype is replaced by resid(lm(y ~ covariate))
+                       before EMMAX, and every permuted surrogate (perm_fun()
+                       acts on the raw phenotype) is residualised the same
+                       way -- the manuscript's 9sp analysis, which adjusts
+                       ecotype for lineage and permutes within lineage.
   external_pvalues/       optional. One .rds per extra p-value engine, each a
                        NAMED numeric vector (names = map$marker). The
                        filename (sans .rds) becomes the engine name -- e.g.
@@ -536,6 +543,32 @@ Developers who need an uninstalled local checkout can set
 users need neither a checkout of `LDscnR` nor `devtools`.
 
 ## Examples
+
+## Reproducing the manuscript
+
+`manuscript/` runs this pipeline on the two full-genome stickleback panels of
+the LDscnR manuscript and compares every result with the manuscript modules
+(LDscnR-paper `module_3sp`, `module_9sp`). The defaults match the modules'
+settings (Stage-1 decay `slide = 500`, `rho = 0.5`, seed 1, GCTA GRM on the
+Stage-1 representatives, the marker-density `size_floor`, 1,000/200
+permutations, 10,000 EcoPeak relocations); the 9sp panel adds
+`input/covariate.rds` (lineage), and both panels permute populations within
+groups with `perm_within_groups()`, which consumes random numbers in the same
+order as the modules. Needs a local LDscnR-paper checkout with the module
+bundles (`LDSCNR_PAPER`, default `~/gitlab/LDscnR-paper`):
+
+```bash
+Rscript manuscript/build_inputs.R   # dataset folders from the module bundles
+Rscript manuscript/run.R            # Stage 1, Stage A, Stage B; ~1 h for both panels
+Rscript manuscript/compare.R        # writes manuscript/comparison.{csv,md}
+```
+
+Result (2026-10-26, LDscnR v0.9.1): `manuscript/comparison_vs_v091.md` -- all 68 checks
+identical to the module scans re-run under v0.9.1 (Stage-1 clusters, GRM, every unit p-value,
+region spans, permutation surrogates, EcoPeak relocations). `manuscript/comparison_vs_stored.md`
+compares with the modules' earlier stored outputs (pre-v0.9.1 LDscnR commits): identical except
+the EcoPeak relocation null mean, fold and p, which changed because v0.9.1 fixed region placement
+in `ld_region_rotation()` (relocations now stay inside the chromosome).
 
 `examples/3sp_chr1_chr4` and `examples/9sp_chr19_chr20` (see
 `examples/build_examples.R`) are real two-chromosome subsets of the
