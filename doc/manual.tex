@@ -7,6 +7,9 @@
 \usepackage[a4paper,margin=2.5cm]{geometry}
 \usepackage{booktabs}
 \usepackage{longtable}
+\usepackage{etoolbox}
+\usepackage{placeins}
+\AtBeginEnvironment{longtable}{\small}
 \usepackage{array}
 \usepackage{graphicx}
 \usepackage{fancyvrb}
@@ -15,16 +18,19 @@
 \usepackage{enumitem}
 \usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black,bookmarksnumbered=true]{hyperref}
 \usepackage{caption}
+\captionsetup[table]{hypcap=false}
+\usepackage{needspace}
 \usepackage{parskip}
-\usepackage{seqsplit}
-\newcommand{\bcode}[1]{\texttt{\seqsplit{#1}}}
+\usepackage{pdflscape}
+\newcommand{\bcode}[1]{\texttt{#1}}
 
 \newcommand{\code}[1]{\texttt{\detokenize{#1}}}
 \setlength{\emergencystretch}{3em}
+\setlength{\tabcolsep}{6pt}
 \newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
 
 \definecolor{codebg}{gray}{0.95}
-\fvset{fontsize=\scriptsize,frame=single,rulecolor=\color{gray!50},xleftmargin=0.5em,xrightmargin=0.5em}
+\fvset{samepage=true,fontsize=\scriptsize,frame=single,rulecolor=\color{gray!50},xleftmargin=0.5em,xrightmargin=0.5em}
 
 \title{\textbf{LDscnR-multi}\\[0.3em]\Large A User Manual}
 \author{Petri Kemppainen and Frederic Guillaume}
@@ -39,7 +45,7 @@ This manual explains how to run genome scans that account for linkage
 disequilibrium (LD) with \code{LDscnR-multi}, for one data set or for
 hundreds in a batch. The workflow uses the \code{LDscnR} R package to group
 correlated markers into Stage-1 units before testing, to assemble significant
-units into outlier regions and to compare the number of discoveries with a
+units into outlier regions and to compare the number of significant Stage-1 units with a
 structure-preserving permutation null. The examples use the full
 three-spined stickleback panel (117 individuals and 790{,}578 markers) and
 the full nine-spined stickleback panel (149 individuals and 1{,}195{,}557
@@ -74,9 +80,9 @@ profile take most of the time.
 A genome scan for markers associated with a phenotype or an environmental
 gradient faces a structural problem, because markers in LD with each other
 are not independent tests. If every marker is tested, one underlying signal,
-such as one causal region, counts as dozens or hundreds of separate
-discoveries. This inflates both the apparent strength of a hit and the
-multiple-testing burden of the whole scan.
+such as one causal region, can produce dozens or hundreds of significant
+markers. Counting them separately exaggerates the number of associated
+regions and increases the multiple-testing burden.
 
 \code{LDscnR} answers this with two stages. Stage~1 groups markers into
 Stage-1 units from genotype LD alone, without the phenotype. Stage~2
@@ -120,7 +126,7 @@ You do not need the manuscript or its analysis scripts to follow this
 manual. Section~\ref{sec:reproduce} describes how \code{manuscript/}
 reproduces the manuscript's empirical results with this workflow.
 
-\subsection{Design: receipts instead of blind reruns}
+\subsection{Reusing previous results}
 
 Every step records its inputs and settings and skips the work when nothing
 has changed (Section~\ref{sec:receipts}). This helps both with one data set
@@ -141,13 +147,14 @@ terms. They are kept so that existing scripts and outputs keep working.
 Table~\ref{tab:terms} lists the correspondence, and the prose of this manual
 uses the manuscript's terms.
 
-\begin{longtable}{@{}L{6.6cm}L{7.6cm}@{}}
-\caption{Names in the code and output files, and the corresponding terms in
-the manuscript and in this manual.}\label{tab:terms}\\
+\noindent\begin{minipage}{\linewidth}
+\small
+\captionof{table}{Names in the code and output files, and the corresponding terms in
+the manuscript and in this manual.}\label{tab:terms}
+\begin{tabular}{@{}L{6.6cm}L{7.6cm}@{}}
 \toprule
 \textbf{Code and output files} & \textbf{Manuscript and this manual} \\
 \midrule
-\endhead
 \code{run_stage_A()} & association scan \\
 \code{run_stage_B()}, \code{stageB_<engine>/} & unit testing and Stage-2
   assembly \\
@@ -161,15 +168,18 @@ cluster, \code{unit_id}, \code{core_snp} & Stage-1 unit, its index and its
   representative marker \\
 \code{size_floor} & minimum Stage-1 unit size (the floor) \\
 \bottomrule
-\end{longtable}
+\end{tabular}
+\end{minipage}\par\medskip
 
 \subsection{Stage-1 clustering: units and \texttt{core\_snp}}
 
 Before any association test, \code{LDscnR}'s
 \code{ld_complexity_reduction()} groups markers into Stage-1 units from
-genotype LD alone. Two markers end up in the same unit only if the LD between
-them, and along a chain of markers connecting them, exceeds a threshold
-$\rho$ (\code{cr_rho}, default 0.50). Each unit has one representative
+genotype LD alone. The setting \code{cr_rho} (default 0.50) determines an
+LD cutoff for each chromosome from its fitted decay curve. Clustering first
+connects markers through above-cutoff LD links, then refines these groups
+using complete linkage: every pair within a final unit must meet the cutoff.
+Each unit has one representative
 marker, its \code{core_snp}. The representative marker does not depend on
 the floor, so the floor profile uses it to match units across floors
 (Section~\ref{sec:floor-profile}). The index \code{unit_id} cannot be used
@@ -178,33 +188,35 @@ for this, because it counts only the units that reach a given floor.
 \subsection{\texttt{ld\_w}: local LD support}
 \label{sec:ldw-concept}
 
-\code{ld_w} measures how much local LD support a marker has. It is reported
-at $\rho = 0.95$ as \code{ld_w_095}. The workflow fits a decay curve
-$r^2 = b + (c-b)/(1+a\cdot d)$ to the decline of LD with distance $d$ on each
-chromosome. For each marker, \code{ld_w} then describes how far the marker's
-local LD extends before it falls below $\rho$. A marker inside a large block
-of correlated markers, such as an inversion or a region of suppressed
-recombination, has a high \code{ld_w}, whereas a marker in an isolated
-stretch of low LD has a low \code{ld_w}. It is not a test statistic and has
-no p-value. It describes the marker's neighbourhood from the genotypes
-alone, and it is reported next to every association result
-(Section~\ref{sec:ld-decay}) and can be plotted in place of the q-value in
-the Manhattan plots (Section~\ref{sec:manhattan}).
+\code{ld_w} measures local LD support. For each marker, it is the median
+$r^2$ with neighbouring markers inside a physical window derived from the
+chromosome's LD-decay fit. The workflow fits
+$r^2 = b + (c-b)/(1+a\cdot d)$ and uses the predicted decay rate
+\code{a_pred} to set the window at $\rho = 0.95$. The resulting value is
+reported as \code{ld_w_095}.
+
+A high value means that the marker is strongly correlated with its local
+neighbours; a low value means weak local correlation. The value is not a
+distance, an association test statistic or a p-value. It depends only on the
+genotypes and is reported alongside association results. The Manhattan plots
+can show it in place of association p-values or q-values
+(Section~\ref{sec:manhattan}).
 
 \subsection{The floor: the minimum size of a tested unit}
 \label{sec:size-floor-concept}
 
 Not every Stage-1 unit is tested. The floor (\code{size_floor}) is the
 minimum number of markers a unit must contain to be tested, and smaller
-units get no p-value. This reduces the number of tests and makes the minimum
+units get no unit-level p-value. This reduces the number of tests and makes the minimum
 support of a tested unit explicit. The floor is never below two. Unless it
 is set explicitly, it is derived from marker density, with one marker of
 floor for every 250 markers per Mb of assayed sequence, rounded
 (\code{size_floor_markers_per_mb} in \code{DEFAULTS}). Density is the number
-of markers divided by the summed span of the chromosomes in the map. A
-density, unlike a marker count, does not change when only some chromosomes
-are analysed, so a two-chromosome example gets the same floor as its full
-panel. The floor is 8 for the three-spined panel (about 2{,}080 markers per
+of markers divided by the summed chromosome spans (\code{max(Pos) - min(Pos)},
+in Mb). Using density reduces dependence on the number of chromosomes
+analysed, although selecting chromosomes with different marker densities
+can still change the floor. For these two-chromosome examples, the rounded
+floor matches that of the full panel. The floor is 8 for the three-spined panel (about 2{,}080 markers per
 Mb) and 12 for the nine-spined panel (about 2{,}960 markers per Mb). Small
 units can still contain real signals, so raising the floor trades genomic
 coverage for a smaller set of better-supported tests
@@ -212,9 +224,9 @@ coverage for a smaller set of better-supported tests
 
 \subsection{Outlier regions: assembling significant units}
 
-A significant unit is not reported on its own. Once unit testing has decided
-which units are significant, Stage~2 assembles nearby significant units into
-an \emph{outlier region}, which is one row of \code{region_table.csv}
+Stage~2 groups significant Stage-1 units into \emph{outlier regions}. A
+region may contain one or more significant units and occupies one row of
+\code{region_table.csv}
 (Section~\ref{sec:unit-testing}). There are two assembly modes. The default,
 \code{stage2_discovered}, repeats \code{LDscnR}'s clustering on the
 significant units only, at its own LD threshold. The alternative,
@@ -224,7 +236,8 @@ distance of each other. The examples in this manual use the default.
 \subsection{Permutation nulls and the permutation function}
 
 The permutation null repeats the association scan with permuted phenotypes
-to see how many discoveries could arise without the observed association.
+to count how many significant Stage-1 units could arise without the
+observed association.
 \emph{How} the phenotype is permuted matters, because shuffling individuals
 without regard to population structure can break the structure that the
 mixed model is meant to account for. \code{LDscnR-multi} therefore requires
@@ -239,19 +252,20 @@ group (\code{perm_within_groups()}), as in the manuscript.
 % =============================================================================
 
 \code{LDscnR-multi} needs R (tested with 4.6.1) and the packages in
-Table~\ref{tab:deps}. The minimum versions are the versions it was tested
-with. Earlier versions may work but have not been tested. The base packages
+Table~\ref{tab:deps}. The listed versions were used for testing. Earlier versions may work but
+have not been tested. The base packages
 \code{parallel}, \code{stats}, \code{tools}, \code{utils} and
 \code{grDevices} come with R, and \code{devtools} is needed only by
 developers who load an uninstalled \code{LDscnR} checkout
 (Section~\ref{sec:ldscnr-version}).
 
-\begin{longtable}{@{}L{3.2cm}L{5.4cm}L{3.2cm}@{}}
-\caption{Package dependencies.}\label{tab:deps}\\
+\noindent\begin{minipage}{\linewidth}\small
+\centering
+\captionof{table}{Package dependencies.}\label{tab:deps}
+\begin{tabular}{@{}L{3.2cm}L{5.4cm}L{3.2cm}@{}}
 \toprule
-\textbf{Package} & \textbf{Minimum version} & \textbf{Source} \\
+\textbf{Package} & \textbf{Tested version} & \textbf{Source} \\
 \midrule
-\endhead
 \code{LDscnR} & 0.9.1 (GitHub tag \code{v0.9.1}) & GitHub \\
 \code{data.table} & 1.18.2 & CRAN \\
 \code{digest} & 0.6.39 & CRAN \\
@@ -263,7 +277,8 @@ developers who load an uninstalled \code{LDscnR} checkout
 \code{SNPRelate} & 1.46.0 & Bioconductor \\
 \code{gdsfmt} & 1.48.0 & Bioconductor \\
 \bottomrule
-\end{longtable}
+\end{tabular}
+\end{minipage}\par\medskip
 
 The first block needs internet access, but later analyses run from local
 files. The validated \code{LDscnR} revision is recorded in
@@ -334,7 +349,7 @@ Apply the same selected marker IDs, in the same order, to
 vectors. Record the filters, the seed, the binning rule and the number of
 markers kept.
 
-Thinning \emph{can} change LD estimates, unit sizes and discoveries. An
+Thinning \emph{can} change LD estimates, unit sizes and outlier regions. An
 outlier region represented by too few remaining markers may disappear,
 whereas the additional markers of an unthinned panel could have made its LD
 pattern testable. When possible, therefore, compare the floor profile and
@@ -343,7 +358,7 @@ apply the thinning rule to hundreds of data sets. The one-million target is
 not proof that denser data cannot reveal additional regions.
 
 % =============================================================================
-\section{Data set folder contract}
+\section{Required input files}
 \label{sec:dataset-contract}
 % =============================================================================
 
@@ -353,31 +368,48 @@ it to the workflow.
 
 \subsection{\code{input/}: what you provide}
 
-\begin{longtable}{@{}L{3.8cm}L{2.4cm}L{8.1cm}@{}}
+\noindent\begin{minipage}{\linewidth}
+\small
+\Needspace{12\baselineskip}
+\subsubsection*{Genotypes and association inputs}
+\begin{tabular}{@{}L{4.0cm}L{3.0cm}L{7.3cm}@{}}
 \toprule
-\textbf{File} & \textbf{Required?} & \textbf{Contents} \\
+\textbf{File} & \textbf{Needed for} & \textbf{Contents} \\
 \midrule
-\endhead
-\code{genotypes.rds} & required & An $n \times m$ numeric dosage matrix
+
+\code{genotypes.rds} & All analyses & An $n \times m$ numeric dosage matrix
   (values from 0 to 2, \code{NA} allowed), with individuals in rows (row
   names are individual IDs) and markers in columns (column names are marker
   IDs). \\
-\code{map.rds} & required & A \code{data.table} or \code{data.frame} with
+\code{map.rds} & All analyses & A \code{data.table} or \code{data.frame} with
   the columns \code{marker}, \code{Chr} and \code{Pos}. \code{map$marker}
   must equal \code{colnames(genotypes)}, in the same order. \\
-\code{phenotype.rds} & for the association scan & A named numeric vector
+\code{phenotype.rds} & Association scan & A named numeric vector
   (names are the row names of the genotypes), or a one-column data frame
   with those row names. \\
-\code{perm_fun.R} & for the association scan & Plain R that defines
+\code{perm_fun.R} & Association scan & Plain R that defines
   \code{perm_fun(b, y)}, which returns one permuted copy of the phenotype
   \code{y} for permutation \code{b}. There is no default
   (Section~\ref{sec:concepts}). The script can use \code{.dataset_dir}. \\
-\code{population.rds} & for the structure-alignment check & A named vector
+\bottomrule
+\end{tabular}
+\end{minipage}\par\medskip
+
+\noindent\begin{minipage}{\linewidth}
+\small
+\Needspace{12\baselineskip}
+\subsubsection*{Alignment inputs and optional settings}
+\begin{tabular}{@{}L{4.0cm}L{3.0cm}L{7.3cm}@{}}
+\toprule
+\textbf{File} & \textbf{Needed for} & \textbf{Contents} \\
+\midrule
+
+\code{population.rds} & Alignment check & A named vector
   from individual to population ID. \\
 \code{structure_group.rds} & optional & A named vector from individual to a
-  coarser sampling group, such as locality or lineage. The permutation null
-  shuffles within these groups. Defaults to \code{population.rds} when
-  absent. \\
+  coarser sampling group, such as locality or lineage. The alignment check uses these groups; its default is
+  \code{population.rds}. The example permutation functions also read this
+  file, but other \code{perm_fun.R} scripts define their own scheme. \\
 \code{covariate.rds} & optional & A named vector from individual to a
   structure covariate, such as lineage. When present, the phenotype is
   replaced by \code{resid(lm(y ~ covariate))} before EMMAX, and every
@@ -387,7 +419,9 @@ it to the workflow.
   from \code{R/00_config.R} (Section~\ref{sec:config-reference}) to override
   it for this data set only, for example \code{cr_rho <- 0.35}. \\
 \bottomrule
-\end{longtable}
+\end{tabular}
+\end{minipage}\par\medskip
+
 
 \code{external_pvalues/} is a second, optional folder next to \code{input/}.
 It holds one \code{.rds} file per extra p-value engine, each a \emph{named}
@@ -408,8 +442,17 @@ value, among populations from the same locality.
 and groups in the same order as the manuscript's modules, so the same seed
 gives the same permuted phenotypes.
 
-\VerbatimInput[firstline=12,lastline=18,fontsize=\tiny,frame=single]{../examples/3sp_chr1_chr4/input/perm_fun.R}
+\begin{Verbatim}
+population <- readRDS(
+  file.path(.dataset_dir, "input", "population.rds"))
+structure_group <- readRDS(
+  file.path(.dataset_dir, "input", "structure_group.rds"))
+perm_fun <- function(b, y) {
+  perm_within_groups(y, population, structure_group)
+}
+\end{Verbatim}
 
+\Needspace{20\baselineskip}
 \subsubsection{What the input files look like}
 
 These are the first rows of the full three-spined panel (117 individuals and
@@ -461,20 +504,22 @@ of a complete run of each full panel from scratch, on one core of an Apple
 M3 Pro laptop with 36~GB of memory and R~4.6.1. A second call on an
 unchanged data set is fast (Section~\ref{sec:receipts}).
 
-\begin{longtable}{@{}L{8.4cm}rr@{}}
-\caption{Run times in minutes for a complete run from scratch, on one core
-(\code{cores = 1}).}\label{tab:timing}\\
+\noindent\begin{minipage}{\linewidth}
+\small
+\captionof{table}{Run times in minutes for a complete run from scratch, on one core
+(\code{cores = 1}).}\label{tab:timing}
+\begin{tabular}{@{}L{8.4cm}rr@{}}
 \toprule
 \textbf{Step} & \textbf{Three-spined} & \textbf{Nine-spined} \\
 \midrule
-\endhead
 Stage 1 & 8.3 & 14.8 \\
 LD-decay report and structure-alignment check & 0.4 & 0.7 \\
 Floor profile, including the association scan and unit testing at the reported floor & 5.4 & 14.3 \\
 Unit testing of the external engine (LFMM2, three-spined only) and the Manhattan plots & 4.6 & 6.6 \\
 \textbf{Total} & 18.6 & 36.4 \\
 \bottomrule
-\end{longtable}
+\end{tabular}
+\end{minipage}\par\medskip
 
 \begin{Verbatim}
 run_dataset("examples/3sp_chr1_chr4")
@@ -484,14 +529,16 @@ result$summary            # one row per data set and engine
 result$alignment_summary  # one row per data set with input/population.rds
 \end{Verbatim}
 
-\code{run_dataset()} runs the following steps. Each has its own receipt, so a
-repeated call after a partial change reruns only what is needed.
+\code{run_dataset()} calls the following steps. Receipts let the analysis
+steps reuse results when their inputs and settings are unchanged; reports
+and plots are regenerated.
 
 \begin{enumerate}
   \item \textbf{Stage 1} (Section~\ref{sec:stage1}) clusters markers by LD
-  from the genotypes alone. It always runs.
+  from the genotypes alone. It is always called and reuses cached
+  results when its inputs and settings are unchanged.
   \item \textbf{LD-decay report} (Section~\ref{sec:ld-decay}) writes out what
-  Stage~1 computed. It always runs.
+  Stage~1 computed. It rewrites the report on every run.
   \item \textbf{Structure-alignment check} (Section~\ref{sec:alignment}) runs
   only if both \code{input/population.rds} and \code{input/phenotype.rds}
   exist.
@@ -522,8 +569,9 @@ with \code{run_dataset()} and the default settings.
 \subsection{Stage 1: LD-based clustering}
 \label{sec:stage1}
 
+{\raggedright
 \textbf{Function:} \code{build_stage1(dataset_dir, cfg)}.
-\textbf{Depends on:} the genotypes and the map, not the phenotype.
+\textbf{Depends on:} the genotypes and the map, not the phenotype.\par}
 
 Stage~1 is the genotype-only foundation of every later step. It writes the
 genotypes to a GDS file, fits the LD-decay curve
@@ -538,8 +586,9 @@ every later step reads from them.
 \subsection{LD-decay report}
 \label{sec:ld-decay}
 
+{\raggedright
 \textbf{Function:} \code{report_ld_decay(dataset_dir, cfg)}.
-\textbf{Writes:} \code{output/ld_decay/}.
+\textbf{Writes:} \code{output/ld_decay/}.\par}
 
 The report writes out the LD-decay fit that \code{build_stage1()} already
 computed, without recomputing anything. It writes three files:
@@ -554,6 +603,7 @@ computed, without recomputing anything. It writes three files:
   page per chromosome (Figure~\ref{fig:decay-curves}).
 \end{itemize}
 
+\Needspace{12\baselineskip}
 \subsubsection*{\code{decay_summary.csv}: one row per chromosome}
 
 The full three-spined panel has 20 rows, one per chromosome. The first four
@@ -573,7 +623,7 @@ are shown:
    ... plus slide_bp_rho_<X> and slide_snp_rho_<X> for X in rho_targets
 \end{Verbatim}
 
-\begin{longtable}{@{}L{2.8cm}L{11.7cm}@{}}
+\begin{longtable}{@{}L{5.8cm}L{8.7cm}@{}}
 \toprule
 \textbf{Column} & \textbf{Meaning} \\
 \midrule
@@ -599,7 +649,7 @@ are shown:
 \code{rho_slide_raw}, \code{rho_slide_pred} & The share of LD ($\rho$)
   retained by the current \code{slide} setting, computed with \code{a} and
   with \code{a_pred}, respectively. \\
-\code{slide_bp_rho_<X>}, \code{slide_snp_rho_<X>} & For each target in
+\code{slide_bp_rho_<X>},\newline \code{slide_snp_rho_<X>} & For each target in
   \code{rho_targets} (default 0.99), the window in base pairs and in markers
   needed to retain that share of LD, computed with \code{a_pred}. \\
 \bottomrule
@@ -617,13 +667,15 @@ window-wise fits.}
 \label{fig:decay-curves}
 \end{figure}
 
+\FloatBarrier
 \subsection{Structure-alignment check}
 \label{sec:alignment}
 
+{\raggedright
 \textbf{Function:} \code{check_structure_alignment(dataset_dir, cfg)}.
 \textbf{Runs when:} both \code{input/population.rds} and
 \code{input/phenotype.rds} exist.
-\textbf{Writes:} \code{output/alignment/}.
+\textbf{Writes:} \code{output/alignment/}.\par}
 
 Before any association test, the check asks how much of the phenotype is
 already explained by population structure. It looks at (a) the structure
@@ -633,9 +685,10 @@ shuffles, and (b) the leading axes of the GRM computed between populations
 alignment does not validate a result, and a high alignment does not
 invalidate one, but a high alignment means that phenotype and ancestry offer
 nearly interchangeable explanations for any signal the association scan
-finds. This is worth knowing before a hit is interpreted. The check uses the
+finds. This is worth knowing before an outlier region is interpreted. The check uses the
 raw phenotype, not the phenotype adjusted for \code{covariate.rds}.
 
+\Needspace{12\baselineskip}
 \subsubsection*{\code{observed.csv}: one row}
 
 \begin{Verbatim}
@@ -647,11 +700,12 @@ raw phenotype, not the phenotype adjusted for \code{covariate.rds}.
                         0.1113596
 \end{Verbatim}
 
-\begin{longtable}{@{}L{4.6cm}L{9.9cm}@{}}
+\noindent\begin{minipage}{\linewidth}
+\small
+\begin{tabular}{@{}L{6.5cm}L{8.0cm}@{}}
 \toprule
 \textbf{Column} & \textbf{Meaning} \\
 \midrule
-\endhead
 \code{n_individuals}, \code{n_populations}, \code{n_structure_groups} &
   The numbers of individuals, populations and structure groups. \\
 \code{grm_axes_r2_population} & $R^2$ of the population-mean phenotype
@@ -663,8 +717,10 @@ raw phenotype, not the phenotype adjusted for \code{covariate.rds}.
 \bcode{structure\_r2\_individual\_weighted} & The same with one point per
   individual, so populations with more individuals count more. \\
 \bottomrule
-\end{longtable}
+\end{tabular}
+\end{minipage}\par\medskip
 
+\Needspace{12\baselineskip}
 \subsubsection*{\code{null_draws.csv}: one row per null scheme and draw}
 
 Each draw (\code{n_draws}, default 1{,}000) recomputes the three measures of
@@ -684,6 +740,7 @@ continuous surrogate with the covariance of the GRM. The first three draws:
                         0.1280067
 \end{Verbatim}
 
+\Needspace{12\baselineskip}
 \subsubsection*{\code{null_summary.csv}: one row per null scheme and measure}
 
 Each observed measure is compared with its null distribution:
@@ -703,11 +760,12 @@ Each observed measure is compared with its null distribution:
                        1.000
 \end{Verbatim}
 
-\begin{longtable}{@{}L{3.6cm}L{10.9cm}@{}}
+\noindent\begin{minipage}{\linewidth}
+\small
+\begin{tabular}{@{}L{6.5cm}L{8.0cm}@{}}
 \toprule
 \textbf{Column} & \textbf{Meaning} \\
 \midrule
-\endhead
 \code{scheme}, \code{metric} & The null scheme and the measure. \\
 \code{observed} & The observed value from \code{observed.csv}. \\
 \code{null_mean}, \code{null_median}, \code{null_sd} & Summary of the null
@@ -715,22 +773,25 @@ Each observed measure is compared with its null distribution:
 \code{null_q025}, \code{null_q975} & The 2.5th and 97.5th percentiles of the
   null. \\
 \bcode{observed\_within\_null95} & \code{TRUE} if the observed value lies
-  between those percentiles, so that it cannot be distinguished from the
-  null. \\
+  within the central 95\% of simulated values. This flag alone does not
+  establish that the observed and null processes are equivalent. \\
 \bcode{proportion\_null\_ge\_observed} & The fraction of null draws at least
   as large as the observed value, a one-sided tail proportion. Low values
   mean that the observed alignment is unusually strong. \\
 \bottomrule
-\end{longtable}
+\end{tabular}
+\end{minipage}\par\medskip
 
-\subsection{Floor profile: a light check of the floor}
+\subsection{Checking sensitivity to the minimum unit size}
 \label{sec:floor-profile}
 
+{\raggedright
 \textbf{Function:} \code{run_floor_profile(dataset_dir, factors = c(0.5, 2))}.
 \textbf{Runs when:} \code{input/phenotype.rds} exists, by default
 (\code{floor_profile = TRUE} in \code{run_dataset()}).
-\textbf{Writes:} \code{output/floor_profile/}.
+\textbf{Writes:} \code{output/floor_profile/}.\par}
 
+\Needspace{12\baselineskip}
 \subsubsection*{Why the floor profile exists}
 
 Any single floor (Section~\ref{sec:size-floor-concept}) is a practical
@@ -751,6 +812,7 @@ regions cost little recall. Recovery at the \emph{lower} floor, where more
 units are tested and the Benjamini-Hochberg (BH) threshold is harder to
 reach, was the more informative of the two checks.
 
+\Needspace{12\baselineskip}
 \subsubsection*{How recovery is decided}
 
 A region is recovered at a comparison floor when at least one of its
@@ -763,6 +825,7 @@ units can both have the same \code{unit_id} at two floors. A unit smaller
 than a comparison floor is not tested there, so it cannot be recovered
 there.
 
+\Needspace{12\baselineskip}
 \subsubsection*{Only the reported floor gets permutations}
 
 \begin{itemize}
@@ -770,8 +833,8 @@ there.
   testing exactly as \code{run_dataset()} does, with the permutation null,
   Stage-2 assembly and, if an \code{annotation} is given, the relocation test.
   \item The two \textbf{comparison} floors are tested on the observed data
-  only (\code{run_stage_B(observed_only = TRUE)}), which never loads a
-  permutation file. The consensus test is fitted once more, at the low floor
+  only, using \code{observed_only = TRUE} in \code{run_stage_B()}. This
+  mode never loads a permutation file. The consensus test is fitted once more, at the low floor
   (\code{run_stage_A(permute = FALSE)}). The units of the high floor are a
   subset of those of the low floor, and a unit's EMMAX p-value does not
   depend on which other units are tested. The high floor therefore reuses
@@ -779,9 +842,13 @@ there.
   repeated. The Simes test reuses the marker-wise scan at every floor.
 \end{itemize}
 
+\Needspace{12\baselineskip}
 \subsubsection*{Output files}
 
-\code{grid.csv} has one row per floor. For the full three-spined panel
+\code{grid.csv} has one row per floor. \code{achieved_reduction} is
+$1 - n_{\mathrm{units\ tested}}/n_{\mathrm{markers}}$: the reduction in
+test count relative to testing every marker. \code{marker_coverage} is the
+fraction of all markers that belong to units reaching that floor. For the full three-spined panel
 (floor 8):
 
 \begin{Verbatim}
@@ -822,11 +889,12 @@ the manuscript. The first three rows:
             1/3 269049
 \end{Verbatim}
 
-\begin{longtable}{@{}L{3.3cm}L{11.2cm}@{}}
+\noindent\begin{minipage}{\linewidth}
+\small
+\begin{tabular}{@{}L{4.4cm}L{10.1cm}@{}}
 \toprule
 \textbf{Column} & \textbf{Meaning} \\
 \midrule
-\endhead
 \code{region_id}, \code{Chr}, \code{from}, \code{to}, \code{span} & The
   outlier region and its span in base pairs. \\
 \code{tick_<floor>} & \code{TRUE} if the region is recovered at that
@@ -836,7 +904,8 @@ the manuscript. The first three rows:
   \code{"2/3"} or \code{"1/3"}. It is never \code{"0/3"}, because every row
   is a region found at the reported floor. \\
 \bottomrule
-\end{longtable}
+\end{tabular}
+\end{minipage}\par\medskip
 
 \textbf{The tier is a robustness label, not a measure of significance.} It
 is not a p-value, a false discovery rate (FDR) or an independent
@@ -846,18 +915,18 @@ across floors can still be caused by population structure. The simulated
 precisions make the label useful for ranking regions, but they are not a
 calibrated probability that a region is true in a new data set.
 
-\subsection{The heavier alternative: \texttt{run\_floor\_sweep()}}
+\subsection{Repeating permutation tests at each floor}
 
+{\raggedright
 \textbf{Function:} \code{run_floor_sweep(dataset_dir, factors = c(0.5, 1, 2))}.
-\code{run_dataset()} does not run it.
+\code{run_dataset()} does not run it.\par}
 
 The floor profile keeps two of its three floors cheap by testing them on the
 observed data only. \code{run_floor_sweep()} instead reruns the full
 permutations at half, one and two times the floor. Each floor is at least
-two, and factors that give the same floor are run once. The sweep is more
-expensive and more thorough. It suits a one-off analysis of one data set
-rather than a batch of hundreds, so call it separately when you want that
-extra assurance.
+two, and factors that give the same floor are run once. The sweep estimates a permutation null at every floor, so it costs more
+than the floor profile. Call \code{run_floor_sweep()} separately when these
+additional null comparisons are needed.
 
 \code{floor_sweep_summary.csv} has one row per floor and test. For the
 two-chromosome three-spined example (floor 8):
@@ -891,9 +960,10 @@ two-chromosome three-spined example (floor 8):
 \subsection{Association scan with EMMAX}
 \label{sec:scan}
 
+{\raggedright
 \textbf{Function:} \code{run_stage_A(dataset_dir, cfg)}.
 \textbf{Writes:} \code{output/pvalues/emmax_unit/} and
-\code{output/pvalues/emmax_simes/}.
+\code{output/pvalues/emmax_simes/}.\par}
 
 Both tests use the same EMMAX mixed model, with the genotypes, the phenotype
 and the GRM from Stage~1, but they test different things:
@@ -911,7 +981,7 @@ and the GRM from Stage~1, but they test different things:
   with Simes' method. It writes \code{p_obs.rds} for \emph{every} marker,
   which the plots need, and \code{p_perm_compact.rds}, the permutations for
   the markers in tested units only. In the full three-spined panel only
-  16{,}890 of 790{,}578 markers (2.1\%) are in units of at least eight
+  about 2.1\% of the 790{,}578 markers belong to units of at least eight
   markers, so restricting the permutations saves most of their cost. The
   results are identical to an unrestricted scan. \code{run_stage_A()} takes
   \code{simes_floor} (by default the floor), and a later call with a lower
@@ -926,18 +996,23 @@ Section~\ref{sec:unit-testing} shows what they become after unit testing.
 \subsection{Unit testing and Stage-2 assembly}
 \label{sec:unit-testing}
 
+{\raggedright
 \textbf{Function:} \code{run_stage_B()}, once per engine, called as\newline
 \code{run_stage_B(dataset_dir, engine, cfg = cfg)}.
-\textbf{Writes:} \code{output/stageB_<engine>/}.
+\textbf{Writes:} \code{output/stageB_<engine>/}.\par}
 
 This step turns p-values into decisions. It decides which Stage-1 units are
 significant after BH correction and assembles them into outlier regions. It
-also runs the permutation test, which compares the observed number of
-significant units with the numbers for permuted phenotypes, and, if an
-annotation is given, the relocation test. The relocation test moves the
+also runs a permutation test when permutation p-values are available.
+This compares the observed number of significant units with the counts for
+permuted phenotypes. An external file of observed marker p-values alone
+does not supply a permutation null; pass permutation p-values to
+\code{run_stage_B()} to test that engine against its own null. If an
+annotation is given, this step also runs the relocation test. The relocation test moves the
 outlier regions to random positions within their chromosomes (10{,}000
 relocations) and asks whether they overlap the annotation more often than
-expected. The step treats every engine in the same way, whether it is the
+expected. Unit testing and Stage-2 assembly use the same procedure for every engine,
+whether it is the
 consensus or Simes test of the association scan or a file in
 \code{external_pvalues/}. The full three-spined panel has an
 \code{external_pvalues/lfmm.rds}, so unit testing runs three times
@@ -946,11 +1021,12 @@ consensus or Simes test of the association scan or a file in
 consensus test and 35 for the Simes test, with the same columns and
 meaning.
 
+\Needspace{12\baselineskip}
 \subsubsection*{\code{snp_results.csv}: one row per marker in the map}
 
 Most markers are not tested, so the first rows of any panel are mostly
-\code{NA}. The rows for significant markers (\code{tested == TRUE &
-significant == TRUE}) are more informative. The first two from the consensus
+\code{NA}. The rows for markers belonging to significant Stage-1 units
+(\code{tested == TRUE & significant == TRUE}) are more informative. The first two from the consensus
 test:
 
 \begin{Verbatim}
@@ -965,11 +1041,12 @@ test:
    TRUE 0.02403367
 \end{Verbatim}
 
-\begin{longtable}{@{}L{3.0cm}L{11.5cm}@{}}
+\noindent\begin{minipage}{\linewidth}
+\small
+\begin{tabular}{@{}L{4.4cm}L{10.1cm}@{}}
 \toprule
 \textbf{Column} & \textbf{Meaning} \\
 \midrule
-\endhead
 \code{marker} & Marker ID, from \code{map$marker}. \\
 \code{Chr}, \code{Pos} & Chromosome and position, from the map. \\
 \code{statistic} & \code{"unit"} (consensus) or \code{"simes"}, the test
@@ -1000,13 +1077,15 @@ test:
   (Section~\ref{sec:ldw-concept}). It depends only on the genotypes, so it
   is the same in every engine's file. \\
 \bottomrule
-\end{longtable}
+\end{tabular}
+\end{minipage}\par\medskip
 
 Markers are assigned to \code{unit_id} and \code{region_id} by Stage-1 and
 Stage-2 membership, not by coordinates. Stage-1 units and outlier regions are
 not always physically contiguous, so a region's span can contain markers
 that belong to another unit or region.
 
+\Needspace{12\baselineskip}
 \subsubsection*{\code{region_table.csv}: one row per outlier region}
 
 The first three outlier regions of the consensus test:
@@ -1018,11 +1097,12 @@ The first three outlier regions of the consensus test:
   Chr11  2035533  2035916       1         9 0.3103448
 \end{Verbatim}
 
-\begin{longtable}{@{}L{2.6cm}L{11.9cm}@{}}
+\noindent\begin{minipage}{\linewidth}
+\small
+\begin{tabular}{@{}L{4.2cm}L{10.3cm}@{}}
 \toprule
 \textbf{Column} & \textbf{Meaning} \\
 \midrule
-\endhead
 \code{Chr}, \code{from}, \code{to} & The region's span in base pairs. \\
 \code{n_units} & The number of significant units assembled into the
   region. \\
@@ -1032,13 +1112,14 @@ The first three outlier regions of the consensus test:
   the span belongs to the region. Lower values mean that other markers are
   interleaved, so the signal is less contiguous. \\
 \bottomrule
-\end{longtable}
+\end{tabular}
+\end{minipage}\par\medskip
 
+\Needspace{12\baselineskip}
 \subsubsection*{\code{report.txt}}
 
-\code{report.txt} holds the console summaries of \code{LDscnR}'s print
-methods (\code{print.ld_outlier_test()}, \code{print.ld_outlier_perm()} and
-\code{print.ld_region_rotation()}), saved as they are. For the consensus test
+\code{report.txt} saves the console summaries without changes. It includes the unit-testing summary, the permutation-test summary
+when available, and the relocation-test summary when available. For the consensus test
 of the full three-spined panel:
 
 \begin{Verbatim}
@@ -1063,12 +1144,16 @@ because the two tests ask different questions.
 \subsection{Manhattan plots}
 \label{sec:manhattan}
 
+{\raggedright
 \textbf{Function:} \code{ldm_manhattan(dataset_dir, engines, value)}.
-\textbf{Writes:} \code{output/figures/}.
+\textbf{Writes:} \code{output/figures/}.\par}
 
-The Manhattan plots show association q-values (\code{value = "q"}), raw
-p-values (\code{value = "p"}) or the local LD measure \code{ld_w_095}
-(\code{value = "ld_w_095"}). The plot of \code{ld_w_095} lets you compare an
+The Manhattan plots show $-\log_{10}(q)$ (\code{value = "q"}),
+$-\log_{10}(p)$ (\code{value = "p"}) or untransformed local LD support
+(\code{value = "ld_w_095"}). The association axes use the marker display
+values \code{q_display} and \code{p_display}, while significance and
+region membership are decided from unit-level q-values. A coloured marker
+can therefore have a display q-value above the unit-testing threshold. The plot of \code{ld_w_095} lets you compare an
 outlier region with the local LD pattern, but it is not a second association
 test.
 
@@ -1082,36 +1167,42 @@ exists for a panel's test, the label also shows the tier, for example
 \code{"R5 (3/3)"}. External engines have no floor profile and keep plain
 labels.
 
-\begin{figure}[htbp]
+\clearpage
+\begin{landscape}
+\begin{figure}[p]
 \centering
-\includegraphics[width=\textwidth]{figures/manhattan_example.png}
+\includegraphics[width=0.96\linewidth,height=0.80\textheight,keepaspectratio]{figures/manhattan_example.png}
 \caption{\code{output/figures/manhattan.png} for the full three-spined panel
-(20 chromosomes), with q-values on the vertical axis and one panel per engine
+(20 chromosomes), with $-\log_{10}(q)$ on the vertical axis and one panel per engine
 (consensus, Simes and LFMM2). The two EMMAX panels show the floor-stability
 tiers.}
 \label{fig:manhattan-q}
 \end{figure}
 
-\begin{figure}[htbp]
+\begin{figure}[p]
 \centering
-\includegraphics[width=\textwidth]{figures/manhattan_ldw_example.png}
+\includegraphics[width=0.96\linewidth,height=0.80\textheight,keepaspectratio]{figures/manhattan_ldw_example.png}
 \caption{The same data set and panels, with \code{ld_w_095} on the vertical
-axis instead of the q-value.}
+axis instead of $-\log_{10}(q)$.}
 \label{fig:manhattan-ldw}
 \end{figure}
+\clearpage
+\end{landscape}
 
 % =============================================================================
 \section{Batch summary: \texttt{run\_all()}}
 % =============================================================================
 
+{\raggedright
 \textbf{Function:} \code{run_all(dataset_dirs)}. It runs \code{run_dataset()}
 on every folder. A failing data set is recorded with \code{status = "error"},
 and the others still run. It writes two summary files to the working
-directory, and \code{run_batch.R} writes them to the repository root.
+directory, and \code{run_batch.R} writes them to the repository root.\par}
 
+\Needspace{12\baselineskip}
 \subsubsection*{\code{summary.csv}: one row per data set and engine}
 
-\begin{longtable}{@{}L{3.6cm}L{11.5cm}@{}}
+\begin{longtable}{@{}L{5.4cm}L{9.7cm}@{}}
 \toprule
 \textbf{Column} & \textbf{Meaning} \\
 \midrule
@@ -1146,8 +1237,8 @@ manuscript's primary null. \code{align_grm_axes_r2} and
 \code{proportion_null_ge_observed}. Low values flag a phenotype whose signal
 is hard to separate from ancestry or sampling structure.
 
-\code{alignment_summary.csv} gives more detail, with one row per data set
-that has \code{input/population.rds}. It holds \code{dataset}, every column
+\code{alignment_summary.csv} gives details for each data set with an
+alignment result (requiring both population and phenotype inputs). It holds \code{dataset}, every column
 of \code{observed.csv} and three columns for each scheme and measure in
 \code{null_summary.csv}. Characters other than letters and digits in the
 scheme name become \code{_}. The columns are named:
@@ -1163,78 +1254,141 @@ scheme name become \code{_}. The columns are named:
 \label{sec:config-reference}
 % =============================================================================
 
-Settings are resolved in this order, with later ones taking precedence:
-\code{DEFAULTS} in \code{R/00_config.R}, then the data set's
-\code{input/config.R}, then a \code{cfg =} argument in the function call.
+\code{resolve_config(dataset_dir)} starts from \code{DEFAULTS} in
+\code{R/00_config.R} and applies overrides from \code{input/config.R}.
+A supplied \code{cfg} is a complete configuration, not a partial list of
+changes. To override settings for one call, resolve the configuration first:
 
-\begin{longtable}{@{}L{2.6cm}L{3.6cm}L{7.9cm}@{}}
+\begin{Verbatim}
+cfg <- resolve_config("examples/3sp_chr1_chr4")
+cfg$cr_rho <- 0.35
+run_dataset("examples/3sp_chr1_chr4", cfg = cfg)
+\end{Verbatim}
+
+\noindent\begin{minipage}{\linewidth}\small
+\subsection*{Stage 1 and LD decay}
+\begin{tabular}{@{}L{6.5cm}L{8.0cm}@{}}
 \toprule
-\textbf{Name} & \textbf{Default} & \textbf{Meaning} \\
+\textbf{Setting and default} & \textbf{Meaning} \\
 \midrule
-\endhead
-\code{cr_rho} & 0.5 & LD threshold for Stage-1 clustering
-  (\code{ld_complexity_reduction()}). \\
-\bcode{decay\_args\$slide} & 500 & Window size, in markers, of the pairwise
-  LD edge list that every LD calculation builds for each chromosome. This is
-  the manuscript's setting, whereas \code{compute_LD_decay()}'s own default
-  is 1{,}000. The edge list is rebuilt when needed (Section~\ref{sec:dataset-contract}),
-  so memory and time grow with \code{slide}. \\
-\bcode{decay\_args\$rho\_targets} & 0.99 & The share of LD for which the
+
+\code{cr_rho}\newline Default: 0.5 & Relative LD setting used to derive chromosome-specific cutoffs for
+  Stage-1 clustering (\code{ld_complexity_reduction()}). \\
+
+\bcode{decay\_args\$slide}\newline Default: 500 & Window size, in markers, for the LD-decay fit and Stage-1
+  clustering. Larger windows require more memory and time. \\
+
+\bcode{decay\_args\$rho\_targets}\newline Default: 0.99 & The share of LD for which the
   LD-decay report gives recommended windows. It does not change the fit. \\
-\bcode{decay\_args} (other fields) & see \code{R/00_config.R} & The other
+
+\bcode{decay\_args} (other fields)\newline Default: see \code{R/00_config.R} & The other
   LD-decay settings, such as the MAF filter, the quantile for background LD,
   the subsample sizes and the number of decay windows. \\
-\code{statistics} & \bcode{c("unit","simes")} & Which tests of the
+
+\bottomrule
+\end{tabular}
+\end{minipage}\par\medskip
+
+\noindent\begin{minipage}{\linewidth}\small
+\subsection*{Association scan}
+\begin{tabular}{@{}L{6.5cm}L{8.0cm}@{}}
+\toprule
+\textbf{Setting and default} & \textbf{Meaning} \\
+\midrule
+
+\code{statistics}\newline Default: \bcode{c("unit","simes")} & Which tests of the
   association scan to run. \\
-\bcode{unit\_repr} & \bcode{"consensus\_dosage"} & How a unit's markers are
+
+\bcode{unit\_repr}\newline Default: \bcode{"consensus\_dosage"} & How a unit's markers are
   combined into one genotype for the consensus test. \\
-\bcode{grm\_method} & \code{"GCTA"} & The \code{SNPRelate::snpgdsGRM()}
+
+\bcode{grm\_method}\newline Default: \code{"GCTA"} & The \code{SNPRelate::snpgdsGRM()}
   method used for the GRM. \\
-\code{b_unit} & 1000 & Permutations for the consensus test. \\
-\code{b_simes} & 200 & Permutations for the Simes test, which is more
+
+\code{b_unit}\newline Default: 1000 & Permutations for the consensus test. \\
+
+\code{b_simes}\newline Default: 200 & Permutations for the Simes test, which is more
   expensive per permutation because every eligible marker is rescanned. \\
-\bcode{size\_floor} & \code{NULL} (derived) & The floor
+
+\bottomrule
+\end{tabular}
+\end{minipage}\par\medskip
+
+\noindent\begin{minipage}{\linewidth}\small
+\subsection*{Unit testing and region assembly}
+\begin{tabular}{@{}L{6.5cm}L{8.0cm}@{}}
+\toprule
+\textbf{Setting and default} & \textbf{Meaning} \\
+\midrule
+
+\bcode{size\_floor}\newline Default: \code{NULL} (derived) & The floor
   (Section~\ref{sec:size-floor-concept}). \code{NULL} derives it from marker
   density, and a number sets it. It is never below 2. \\
-\bcode{size\_floor\_markers\_per\_mb} & 250 & Markers per Mb for each marker
-  of derived floor, so that the floor is round(density / 250). \\
-\code{alpha} & 0.05 & Significance threshold after BH correction. \\
-\bcode{assembly} & \bcode{"stage2\_discovered"} & How significant units are
+
+\bcode{size\_floor\_markers\_per\_mb}\newline Default: 250 & Marker-density divisor used to derive the floor:
+  $\max(2, \operatorname{round}(\mathrm{density}/250))$ at the default. \\
+
+\code{alpha}\newline Default: 0.05 & Significance threshold after BH correction. \\
+
+\bcode{assembly}\newline Default: \bcode{"stage2\_discovered"} & How significant units are
   assembled into outlier regions, either by a second clustering of the
   significant units (\code{"stage2_discovered"}) or by merging their spans
   (\code{"physical"}). \\
-\bcode{score\_threshold} & 0.80 & LD threshold for
+
+\bcode{score\_threshold}\newline Default: 0.80 & LD threshold for
   \code{"stage2_discovered"} assembly. \\
-\bcode{distance\_threshold} & $10^5$ & The largest distance, in base pairs,
+
+\bcode{distance\_threshold}\newline Default: $10^5$ & The largest distance, in base pairs,
   across which \code{"stage2_discovered"} assembly merges units. \\
-\code{gap} & $3\times 10^5$ & The largest gap, in base pairs, across which
+
+\code{gap}\newline Default: $3\times 10^5$ & The largest gap, in base pairs, across which
   \code{"physical"} assembly merges units. \\
-\bcode{n\_rotations} & 10000 & Number of relocations in the relocation test
+
+\bottomrule
+\end{tabular}
+\end{minipage}\par\medskip
+
+\noindent\begin{minipage}{\linewidth}\small
+\subsection*{Relocation test and computing}
+\begin{tabular}{@{}L{6.5cm}L{8.0cm}@{}}
+\toprule
+\textbf{Setting and default} & \textbf{Meaning} \\
+\midrule
+
+\bcode{n\_rotations}\newline Default: 10000 & Number of relocations in the relocation test
   (\code{ld_region_rotation()}), used only with an \code{annotation}. \\
-\bcode{rotation\_scheme} & \code{"within"} & Relocation within
+
+\bcode{rotation\_scheme}\newline Default: \code{"within"} & Relocation within
   chromosomes. \\
-\code{seed} & 1 & Random seed. \\
-\code{cores} & 1 & Parallel workers for the permutations. Each extra worker
+
+\code{seed}\newline Default: 1 & Random seed. \\
+
+\code{cores}\newline Default: 1 & Parallel workers for the permutations. Each extra worker
   holds its own copy of the working data, so watch the memory with many
   markers. On a 36~GB laptop, four workers ran the full panels, whereas
   eight workers left almost no free memory. \\
+
 \bottomrule
-\end{longtable}
+\end{tabular}
+\end{minipage}\par\medskip
+
 
 % =============================================================================
 \section{Caching and receipts}
 \label{sec:receipts}
 % =============================================================================
 
-Every step (Stage~1, the association scan, unit testing for each engine and
-the structure-alignment check) saves a hash of its inputs and settings in a
+Each analysis step (Stage~1, the association scan, unit testing for each
+engine and the structure-alignment check) saves a hash of its inputs and settings in a
 \code{_receipt.rds} file next to its output, and it skips the work when
 nothing has changed. The floor profile and the floor sweep are made of these
 steps, so they use the same receipts. The hashes are of file
 \textbf{contents}, not timestamps, so a \code{git checkout} or a copied file
-cannot make a step look unchanged. Running \code{run_dataset()} or
-\code{run_all()} again on an unchanged data set only reads the receipts.
-Pass \code{force = TRUE} to any step to rebuild it anyway.
+cannot hide a change in contents. Unchanged runs reuse cached analysis
+results, but still read input and cached files and check their hashes.
+The LD-decay report is rewritten, and plots are redrawn unless
+\code{plot = FALSE}. Pass \code{force = TRUE} to an analysis step to
+rebuild its results even when the receipt is current.
 
 A receipt is also out of date when one of its recorded outputs is missing or
 when the validated \code{LDscnR} revision has changed. The receipt of the
@@ -1256,14 +1410,15 @@ repository). The default settings already match the modules' settings
 (lineage), and both panels permute populations within groups with
 \code{perm_within_groups()}.
 
-\begin{longtable}{@{}L{5.0cm}L{9.0cm}@{}}
-\caption{Settings shared by the manuscript and the defaults of
-\code{LDscnR-multi}.}\label{tab:repro}\\
+\noindent\begin{minipage}{\linewidth}
+\small
+\captionof{table}{Settings shared by the manuscript and the defaults of
+\code{LDscnR-multi}.}\label{tab:repro}
+\begin{tabular}{@{}L{5.0cm}L{9.0cm}@{}}
 \toprule
 \textbf{Setting} & \textbf{Value} \\
 \midrule
-\endhead
-Stage-1 LD threshold & $\rho = 0.50$ \\
+Stage-1 LD setting & \code{cr_rho = 0.50} \\
 LD-decay window (\code{slide}) & 500 markers \\
 GRM & GCTA, from the representative marker of every Stage-1 unit \\
 Floor & marker-density rule (8 for three-spined, 12 for nine-spined) \\
@@ -1273,7 +1428,8 @@ Floor profile & half and twice the floor, recovery as in
   Section~\ref{sec:floor-profile} \\
 Random seed & 1 \\
 \bottomrule
-\end{longtable}
+\end{tabular}
+\end{minipage}\par\medskip
 
 The scripts need the modules' Stage-1 bundles and data from a local
 LDscnR-paper checkout (environment variable \code{LDSCNR_PAPER}). Without
@@ -1336,6 +1492,7 @@ median exactly), so these p-values are genomic-control corrected.
 \label{sec:cite}
 % =============================================================================
 
+{\raggedright
 If you use \code{LDscnR-multi}, please cite the manuscript and the
 \code{LDscnR} package. \code{CITATION.cff} in the repository holds the same
 information in machine-readable form. \code{LDscnR-multi} is distributed
@@ -1346,7 +1503,7 @@ under the MIT licence (\code{LICENSE}), the same licence as \code{LDscnR}.
   reduction for genome scans. \emph{bioRxiv}.
   \url{https://doi.org/10.64898/2026.10.27.762116}. Submitted to
   \emph{Molecular Ecology Resources}.
-  \item Kemppainen P. LDscnR, version 0.9.1. R package.
+  \item Kemppainen P. LDscnR, version 0.9.1. R package.\newline
   \url{https://github.com/genomeinsights/LDscnR}.
 \end{itemize}
 
@@ -1381,13 +1538,15 @@ Methods referred to in this manual:
   Genetics} 88: 76--82.
 \end{itemize}
 
+\par}
+
 % =============================================================================
 \appendix
 \section{Full output directory tree}
 \label{sec:appendix-tree}
 % =============================================================================
 
-\begin{Verbatim}
+\begin{Verbatim}[samepage=true]
 <dataset_dir>/
   input/
     genotypes.rds, map.rds, phenotype.rds, perm_fun.R,
