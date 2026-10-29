@@ -262,7 +262,7 @@ run_stage_B <- function(dataset_dir, engine, p_obs = NULL, p_perm = NULL, p_perm
 
   if (isTRUE(observed_only)) {
     if (!is.null(annotation))
-      say("    [stageB:%s] observed_only = TRUE -- ignoring supplied `annotation` (no ld_region_rotation())\n", engine)
+      say("    [unit test:%s] observed_only = TRUE -- ignoring supplied `annotation` (no relocation test)\n", engine)
     p_perm <- NULL
     p_perm_compact <- NULL
     annotation <- NULL
@@ -408,7 +408,7 @@ run_stage_B <- function(dataset_dir, engine, p_obs = NULL, p_perm = NULL, p_perm
     report_lines <<- c(report_lines, txt, "")
   }
 
-  say("    [stageB:%s] ld_outlier_test(statistic = \"%s\")\n", engine, statistic)
+  say("    [unit test:%s] ld_outlier_test(statistic = \"%s\")\n", engine, statistic)
   test <- ld_outlier_test(s1$stage1, map, p_obs, statistic = statistic, size_floor = cfg$size_floor,
                           alpha = cfg$alpha, assembly = cfg$assembly, GTs = s1$genotypes,
                           LD_decay = s1$LD_decay, score_threshold = cfg$score_threshold,
@@ -422,7 +422,7 @@ run_stage_B <- function(dataset_dir, engine, p_obs = NULL, p_perm = NULL, p_perm
     ## nothing meaningful -- p_perm_B already carries the real count from
     ## wherever p_perm was resolved, above.
     B <- p_perm_B
-    say("    [stageB:%s] ld_outlier_perm(): %d surrogates\n", engine, B)
+    say("    [unit test:%s] ld_outlier_perm(): %d surrogates\n", engine, B)
     perm <- ld_outlier_perm(test, s1$stage1, map, p_perm, GTs = s1$genotypes, LD_decay = s1$LD_decay,
                             B = B, level = "units", cores = cfg$cores)
     .print_and_log(perm)
@@ -430,7 +430,7 @@ run_stage_B <- function(dataset_dir, engine, p_obs = NULL, p_perm = NULL, p_perm
 
   rotation <- NULL
   if (!is.null(annotation) && nrow(test$regions)) {
-    say("    [stageB:%s] ld_region_rotation(): %d draws\n", engine, cfg$n_rotations)
+    say("    [unit test:%s] relocation test, ld_region_rotation(): %d relocations\n", engine, cfg$n_rotations)
     rotation <- ld_region_rotation(data.table::copy(test$regions), annotation, chrom_lengths,
                                    scheme = cfg$rotation_scheme, n_rotations = cfg$n_rotations,
                                    seed = cfg$seed)

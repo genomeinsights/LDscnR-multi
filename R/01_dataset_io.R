@@ -117,7 +117,7 @@ read_dataset <- function(dataset_dir, need_phenotype = FALSE) {
     if (anyNA(names(phenotype)) || length(phenotype) != nrow(genotypes))
       stop(ph_f, ": phenotype names do not cover genotypes rownames.")
   } else if (need_phenotype) {
-    stop("Stage A needs ", ph_f, ", which is absent.")
+    stop("The association scan (run_stage_A()) needs ", ph_f, ", which is absent.")
   }
 
   covariate <- NULL

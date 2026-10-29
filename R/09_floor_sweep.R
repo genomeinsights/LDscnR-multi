@@ -44,12 +44,12 @@
 ## @param plot Write a combined output/figures/manhattan_floor_sweep.{png,pdf}
 ##   (one panel per (floor, statistic), via ldm_manhattan()).
 ## @return list(summary (data.table, one row per (floor, statistic): floor,
-##   factor, n_units_tested, n_significant, n_regions), floors (the resolved
+##   n_units_tested, n_significant, n_regions), floors (the resolved
 ##   integer floors actually run), figure).
 run_floor_sweep <- function(dataset_dir, factors = c(0.5, 1, 2), cfg = resolve_config(dataset_dir),
                             annotation = NULL, chrom_lengths = NULL, plot = TRUE, force = FALSE) {
   if (!file.exists(file.path(dataset_dir, "input", "phenotype.rds")))
-    stop("run_floor_sweep() needs input/phenotype.rds (Stage A must be able to run).")
+    stop("run_floor_sweep() needs input/phenotype.rds (the association scan must be able to run).")
 
   base_floor <- cfg$size_floor
   floor_of <- vapply(factors, function(f) as.integer(max(2L, round(base_floor * f))), 0L)

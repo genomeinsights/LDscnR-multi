@@ -90,7 +90,7 @@ run_stage_A <- function(dataset_dir, cfg = resolve_config(dataset_dir), force = 
   ## residualised the same way (see .emmax_perm_matrix()).
   y_test <- adjust_phenotype(d$phenotype, d$covariate)
   if (!is.null(d$covariate))
-    say("    [stage A] phenotype residualised on input/covariate.rds (%d groups, R^2 = %.3f)\n",
+    say("    [association scan] phenotype residualised on input/covariate.rds (%d groups, R^2 = %.3f)\n",
         length(unique(d$covariate)),
         summary(stats::lm(as.numeric(d$phenotype) ~ d$covariate))$r.squared)
 
@@ -186,7 +186,7 @@ run_stage_A <- function(dataset_dir, cfg = resolve_config(dataset_dir), force = 
     params <- list(grm_method = cfg$grm_method, b = cfg$b_simes, seed = cfg$seed,
                    simes_floor = simes_floor, n_eligible = length(eligible))
     if (force || stage_stale(out_dir, stage_inputs, params, label = "emmax_simes")) {
-      say("    [emmax_simes] marker-level emmax_fast (observed, all %s markers); %d permutations restricted to %s markers (%.1f%%) in clusters clearing simes_floor = %d\n",
+      say("    [emmax_simes] marker-level emmax_fast (observed, all %s markers); %d permutations restricted to %s markers (%.1f%%) in Stage-1 units clearing simes_floor = %d\n",
           format(ncol(s1$genotypes), big.mark = ","), cfg$b_simes, format(length(eligible), big.mark = ","),
           100 * length(eligible) / ncol(s1$genotypes), simes_floor)
       ms <- .marker_scan()

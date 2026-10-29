@@ -90,7 +90,7 @@ run_dataset <- function(dataset_dir, engines = NULL, cfg = resolve_config(datase
     }
     stageA <- run_stage_A(dataset_dir, cfg, force = force)
   } else {
-    say("    [stage A] skipped -- no input/phenotype.rds\n")
+    say("    [association scan] skipped -- no input/phenotype.rds\n")
   }
 
   ## Exactly the two canonical Stage A engines, not every subdirectory under
@@ -110,7 +110,7 @@ run_dataset <- function(dataset_dir, engines = NULL, cfg = resolve_config(datase
 
   if (!length(all_engines)) {
     warning("run_dataset(", basename(dataset_dir), "): no p-value engine available -- ",
-           "no input/phenotype.rds for Stage A, and no external_pvalues/*.rds.")
+           "no input/phenotype.rds for the association scan, and no external_pvalues/*.rds.")
     return(list(stage1 = s1, ld_decay = ld_decay, alignment = alignment, floor_profile = fp,
                stageA = stageA, results = list(), figure = NULL))
   }
