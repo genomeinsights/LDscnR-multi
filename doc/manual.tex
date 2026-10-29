@@ -1305,8 +1305,9 @@ chromosome.
 The LFMM2 p-values are not computed here. \code{manuscript/build_inputs.R}
 converts the manuscript's stored LFMM2 F statistics
 (\code{LEA::lfmm2.test()}, $K = 7$) to p-values with
-\code{pf(F, 1, n - 2)}, exactly as the modules do. These F statistics are not
-divided by the genomic inflation factor.
+\code{pf(F, 1, n - 2)}, exactly as the modules do. The stored F statistics are
+already divided by the genomic inflation factor (their median equals the null
+median exactly), so these p-values are genomic-control corrected.
 
 % =============================================================================
 \section{Known limitations}

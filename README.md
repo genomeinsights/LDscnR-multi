@@ -588,8 +588,10 @@ chromosome.
 
 The LFMM2 p-values are not computed here. `manuscript/build_inputs.R` converts
 the manuscript's stored LFMM2 F statistics (`LEA::lfmm2.test()`, K = 7) to
-p-values with `pf(F, 1, n - 2)`, exactly as the modules do. These F
-statistics are not divided by the genomic inflation factor.
+p-values with `pf(F, 1, n - 2)`, exactly as the modules do. The stored F
+statistics are already divided by the genomic inflation factor (their median
+equals the null median exactly), so these p-values are genomic-control
+corrected.
 
 ## Scope
 
