@@ -1,0 +1,43 @@
+cff-version: 1.2.0
+message: "If you use LDscnR-multi, please cite the LDscnR manuscript (preferred citation below) and the LDscnR R package."
+title: "LDscnR-multi: a batch workflow for LD-aware genome scans with LDscnR"
+type: software
+version: "0.9.1"
+license: MIT
+repository-code: "https://github.com/genomeinsights/LDscnR-multi"
+authors:
+  - family-names: Kemppainen
+    given-names: Petri
+    affiliation: "Department of Organismal and Evolutionary Biology, University of Helsinki"
+    email: petri@genomeinsights.fi
+  - family-names: Guillaume
+    given-names: Frederic
+    affiliation: "Department of Organismal and Evolutionary Biology, University of Helsinki"
+keywords:
+  - linkage disequilibrium
+  - genome scan
+  - genome-wide association
+  - outlier regions
+  - R
+references:
+  - type: software
+    title: "LDscnR"
+    version: "0.9.1"
+    repository-code: "https://github.com/genomeinsights/LDscnR"
+    authors:
+      - family-names: Kemppainen
+        given-names: Petri
+preferred-citation:
+  type: article
+  title: "LDscnR: LD-aware complexity reduction for genome scans"
+  authors:
+    - family-names: Kemppainen
+      given-names: Petri
+      affiliation: "Department of Organismal and Evolutionary Biology, University of Helsinki"
+    - family-names: Guillaume
+      given-names: Frederic
+      affiliation: "Department of Organismal and Evolutionary Biology, University of Helsinki"
+  journal: "Molecular Ecology Resources"
+  status: submitted
+  year: 2026
+  notes: "Submitted to Molecular Ecology Resources. bioRxiv preprint; DOI pending."
