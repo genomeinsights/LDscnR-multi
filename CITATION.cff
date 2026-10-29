@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-message: "If you use LDscnR-multi, please cite the LDscnR manuscript (preferred citation below) and the LDscnR R package."
+message: "If you use LDscnR-multi, please cite the LDscnR manuscript (preferred citation below, a bioRxiv preprint submitted to Molecular Ecology Resources) and the LDscnR R package."
 title: "LDscnR-multi: a batch workflow for LD-aware genome scans with LDscnR"
 type: software
 version: "0.9.1"
@@ -37,7 +37,9 @@ preferred-citation:
     - family-names: Guillaume
       given-names: Frederic
       affiliation: "Department of Organismal and Evolutionary Biology, University of Helsinki"
-  journal: "Molecular Ecology Resources"
-  status: submitted
+  journal: "bioRxiv"
+  status: preprint
   year: 2026
-  notes: "Submitted to Molecular Ecology Resources. bioRxiv preprint; DOI pending."
+  doi: "10.64898/2026.10.27.762116"
+  url: "https://doi.org/10.64898/2026.10.27.762116"
+  notes: "Submitted to Molecular Ecology Resources."
