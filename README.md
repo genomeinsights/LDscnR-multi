@@ -1,613 +1,651 @@
 # LDscnR-multi
 
-Batch driver for [LDscnR](https://github.com/genomeinsights/LDscnR)'s
-association + LD-aware outlier-region pipeline: run it across as many
-self-contained dataset folders as exist on disk, write the results back into
-each folder, and roll up a cross-dataset summary. It works for one dataset
-or hundreds. This repo is the workflow, not a package -- it depends on
-`LDscnR` being installed (see
-"LDscnR version" below) and sources plain `R/*.R` files.
+LDscnR-multi is a batch workflow for
+[LDscnR](https://github.com/genomeinsights/LDscnR), the R package for genome
+scans that account for linkage disequilibrium (LD). It runs the LDscnR
+association and outlier-region analysis on any number of self-contained
+dataset folders, writes the results back into each folder and combines them
+into a summary across data sets. It works for one data set or for hundreds.
+This repository is a set of R scripts, not a package. It needs LDscnR
+installed (see [LDscnR version](#ldscnr-version)) and sources the plain
+`R/*.R` files.
 
-On the example machines, complete full-genome runs took about **12 minutes
-for 790,578 markers (3sp)** and **24 minutes for 1,195,557 markers (9sp)**.
-These are measured examples, not guaranteed runtimes. The EMMAX scans are
-comparatively fast because `emmax_fast()` reuses the fitted relationship
-model; Stage-1 LD work and the floor profile account for much of the time.
+LDscnR-multi version 0.9.1 matches LDscnR v0.9.1, the version used in the
+manuscript (see [How to cite](#how-to-cite)).
 
-Two stages, per dataset:
+On one core of an Apple M3 Pro laptop (36 GB memory, R 4.6.1), a complete run
+of `run_dataset()` took about 19 minutes for the full three-spined stickleback
+panel (790,578 markers) and about 36 minutes for the full nine-spined
+stickleback panel (1,195,557 markers), including the Manhattan plots. The
+manual breaks these times down by step. These are measured examples, not
+promised run times. The association scans are fast because `emmax_fast()`
+reuses the fitted relationship model, whereas the Stage-1 LD calculations and
+the floor profile take most of the time.
 
-- **Stage A** (`run_stage_A()`): genotypes + map + phenotype -> EMMAX
-  observed and permuted-null p-values (two arms: `emmax_unit`, one test per
-  LD-cluster; `emmax_simes`, one test per marker aggregated per cluster).
-- **Stage B** (`run_stage_B()`): tests the Stage-1 units and assembles
-  significant units into reported regions. It accepts Stage A's results or
-  marker-level p-values from an external method such as LFMM.
+## What the workflow does
 
-Plus a flexible, multi-track Manhattan plot (`ldm_manhattan()`), a pre-scan
-diagnostic for phenotype/structure confounding (`check_structure_alignment()`),
-a full-permutation `size_floor` sensitivity sweep (`run_floor_sweep()`),
-floor-stability labels for every reported region (`run_floor_profile()`), and a batch loop (`run_all()`) that isolates one
-dataset's failure from the rest and writes `summary.csv` +
-`alignment_summary.csv`.
+The manuscript describes the method in two stages. Stage 1 groups markers
+into Stage-1 units from genotype LD alone, without the phenotype. Stage 2
+assembles the significant Stage-1 units into outlier regions. The workflow
+runs these steps for each data set:
 
-The Manhattan plots put methods on a shared genome-wide axis. Grey points
-show background markers; coloured points identify reported regions. Nearby
-regions receive contrasting colours, and selected regions are labelled
-directly. See the manual for plotting options and examples.
+1. **Stage 1** (`build_stage1()`) builds the Stage-1 units, the LD-decay fit
+   and the genomic relationship matrix (GRM).
+2. **Association scan** (`run_stage_A()`) uses EMMAX (efficient mixed-model
+   association expedited; Kang et al. 2010) to compute observed p-values and
+   p-values for permuted phenotypes. It has two tests. The *consensus* test
+   fits one association per Stage-1 unit. The *Simes* test fits one
+   association per marker and combines the marker p-values within each
+   Stage-1 unit with Simes' method.
+3. **Unit testing and Stage-2 assembly** (`run_stage_B()`) decides which
+   Stage-1 units are significant and assembles them into outlier regions. It
+   accepts the association scan's results or marker-wise p-values from
+   another method, such as LFMM2 (latent factor mixed model; Caye et al.
+   2019).
+
+The function names `run_stage_A()` and `run_stage_B()` are kept for
+compatibility. They are not the manuscript's Stage 1 and Stage 2. The table
+below lists the other names that differ between the code and the manuscript.
+
+| In the code and output files | In the manuscript and this README |
+| --- | --- |
+| `run_stage_A()` | association scan |
+| `run_stage_B()`, `stageB_<engine>/` | unit testing and Stage-2 assembly |
+| statistic `unit`, engine `emmax_unit` | consensus test |
+| statistic `simes`, engine `emmax_simes` | Simes test |
+| `ld_region_rotation()`, `n_rotations`, `region_rotation.rds` | relocation test, number of relocations |
+| `canonical_regions_*.csv`, "canonical floor" | outlier regions at the reported floor |
+| cluster, `unit_id`, `core_snp` | Stage-1 unit, its index and its representative marker |
+| `size_floor` | minimum Stage-1 unit size (the floor) |
+
+The workflow also provides:
+
+- a multi-track Manhattan plot (`ldm_manhattan()`);
+- a check of how closely the phenotype follows population structure, run
+  before the association scan (`check_structure_alignment()`);
+- floor-stability labels for every outlier region (`run_floor_profile()`);
+- a sensitivity sweep over the floor with full permutations
+  (`run_floor_sweep()`);
+- a batch loop (`run_all()`) that keeps one data set's failure from stopping
+  the others and writes `summary.csv` and `alignment_summary.csv`.
+
+The Manhattan plots show every method on one genome-wide axis. Grey points
+are background markers, and coloured points are markers in outlier regions.
+Nearby regions get contrasting colours, and the strongest regions are
+labelled directly. The manual describes the plotting options.
+
+## Installation
+
+LDscnR-multi needs R (tested with 4.6.1) and the packages below. The minimum
+versions are the versions it was tested with. Earlier versions may work but
+have not been tested.
+
+| Package | Minimum version | Source |
+| --- | --- | --- |
+| LDscnR | 0.9.1 (GitHub tag `v0.9.1`) | GitHub |
+| data.table | 1.18.2 | CRAN |
+| digest | 0.6.39 | CRAN |
+| ggplot2 | 4.0.3 | CRAN |
+| ggrepel | 0.9.8 | CRAN |
+| patchwork | 1.3.2 | CRAN |
+| igraph | 2.3.1 | CRAN |
+| remotes | 2.5.0 | CRAN |
+| SNPRelate | 1.46.0 | Bioconductor |
+| gdsfmt | 1.48.0 | Bioconductor |
+
+The base packages `parallel`, `stats`, `tools`, `utils` and `grDevices` come
+with R. `devtools` is needed only by developers who load an uninstalled LDscnR
+checkout.
+
+```r
+install.packages(c("remotes", "BiocManager", "data.table", "digest",
+                   "ggplot2", "ggrepel", "patchwork", "igraph"))
+BiocManager::install(c("SNPRelate", "gdsfmt"))
+remotes::install_github("genomeinsights/LDscnR@v0.9.1")
+```
+
+Then download or clone this repository. LDscnR-multi itself is not installed.
 
 ## Quick start
 
-The same `run_dataset()` call works for one dataset; `run_all()` or
-`run_batch.R` loops over many folders. A full guide is in
+The same `run_dataset()` call works for one data set, whereas `run_all()` or
+`run_batch.R` loops over many folders. The full guide is the manual,
 [`doc/manual.pdf`](doc/manual.pdf).
 
 ```r
-remotes::install_github("genomeinsights/LDscnR@v0.9.1") # once
 library(LDscnR)
 for (f in sort(list.files("R", pattern = "\\.R$", full.names = TRUE))) source(f)
 
 run_dataset("examples/3sp_chr1_chr4")
 result <- run_all(c("examples/3sp_chr1_chr4", "examples/9sp_chr19_chr20"))
-result$summary            # one row per (dataset, engine)
-result$alignment_summary  # one row per dataset with input/population.rds
+result$summary            # one row per data set and engine
+result$alignment_summary  # one row per data set with input/population.rds
 ```
 
-For very dense panels, consider a phenotype-blind, reproducible thinning
-step to approximately one million well-distributed filtered markers before
-creating the input files. Sample across chromosomes and short physical bins,
-retaining several markers in each bin; do not keep only one marker per LD
-cluster. Apply the identical marker subset to the map, genotype matrix and
-external p-value vectors. This is a practical runtime target, **not** a
-detection guarantee: thinning can change LD clusters and remove a genuine
-signal. Compare a representative dense and thinned analysis if possible.
-
-or from the shell:
+From the shell:
 
 ```bash
 Rscript run_batch.R examples/3sp_chr1_chr4 examples/9sp_chr19_chr20
 Rscript run_batch.R examples/                 # every subfolder with an input/
 ```
 
+`run_batch.R` writes `summary.csv` and `alignment_summary.csv` to the
+repository root, whereas an interactive `run_all()` writes them to the
+working directory.
+
+### Very dense panels
+
+For very dense panels, consider thinning to about one million well-spread
+markers before you create the input files. Use a recorded random seed and
+do not use the phenotype. Sample across chromosomes and short physical bins,
+and keep several markers in each bin. Do not keep only one marker per Stage-1
+unit, because that defeats unit-level testing. Apply the same marker subset
+to the map, the genotype matrix and any external p-value vectors. One million
+markers is a practical run-time target, **not** a guarantee of detection,
+because thinning can change the Stage-1 units and remove a real signal. If
+possible, compare one dense and one thinned analysis.
+
+## Examples
+
+`examples/3sp_chr1_chr4` and `examples/9sp_chr19_chr20` are two-chromosome
+subsets of the three-spined and nine-spined stickleback panels analysed in
+the manuscript (data from Fang et al. 2021). They are small enough to run the
+whole workflow in a few minutes. The three-spined example reproduces known
+biology, because its strongest Chr1 outlier region (Chr1:21.49-21.94 Mb) lies
+on the known marine-freshwater inversion. It also includes
+`external_pvalues/lfmm.rds`, which shows unit testing on p-values from a
+method other than EMMAX. The nine-spined example has no external p-values,
+but it has `input/covariate.rds` (lineage), as in the manuscript's
+nine-spined analysis.
+
+`examples/build_examples.R` regenerates the example inputs from the
+manuscript modules' bundles. Only maintainers need it (see its header).
+
 ## Dataset folder contract
 
 ```
 <dataset_dir>/
   input/
-    genotypes.rds     required. n x m numeric dosage matrix (0/1/2, NA ok),
-                       individuals in rows (rownames = individual IDs),
-                       markers in columns (colnames = marker IDs).
-    map.rds             required. data.table/data.frame with marker, Chr, Pos.
-                       map$marker must equal colnames(genotypes), same order.
-    phenotype.rds        optional -- only needed to run Stage A. A named
-                       numeric vector (names = genotypes' rownames), or a
-                       1-column data.frame with those rownames.
-    config.R              optional. Plain R assigning any DEFAULTS name from
-                       R/00_config.R (e.g. `cr_rho <- 0.35`) to override it
-                       for this dataset only.
-    perm_fun.R              REQUIRED for Stage A -- run_stage_A() errors
-                       without it, with no generic fallback. Defines
-                       `perm_fun(b, y)` returning a permuted phenotype for
-                       permutation index b. There is deliberately no default:
-                       an unstratified sample(y), and later a
-                       structure_group.rds-based shuffle done at the
-                       INDIVIDUAL level, were both tried and both broke the
-                       sampling design -- the second was caught by an
-                       external audit reproducing, on both worked examples,
-                       a shuffle that made a phenotype constant-within-
-                       population vary WITHIN populations. What "no signal"
-                       means is specific to each dataset's own sampling
-                       design, so this repo asks for it explicitly, per
-                       dataset (`.dataset_dir` is available to the sourced
-                       script). See examples/*/input/perm_fun.R for the
-                       population-level, structure-preserving pattern both
-                       worked examples actually use.
-    population.rds          optional (required only for
-                       check_structure_alignment()). Named vector, individual
-                       -> population ID.
-    structure_group.rds       optional. Named vector, individual -> coarser
-                       sampling group (locality/lineage/etc). Defaults to
-                       population.rds when absent.
-    covariate.rds             optional (Stage A). Named vector, individual ->
-                       structure covariate (e.g. lineage). When present, the
-                       phenotype is replaced by resid(lm(y ~ covariate))
-                       before EMMAX, and every permuted surrogate (perm_fun()
-                       acts on the raw phenotype) is residualised the same
-                       way -- the manuscript's 9sp analysis, which adjusts
-                       ecotype for lineage and permutes within lineage.
-  external_pvalues/       optional. One .rds per extra p-value engine, each a
-                       NAMED numeric vector (names = map$marker). The
-                       filename (sans .rds) becomes the engine name -- e.g.
-                       external_pvalues/lfmm.rds -> engine "lfmm".
-  cache/                   gitignored, regenerable: the GDS file, LD-decay fit,
-                       stage-1 clustering, GRM. Rebuilt automatically when
-                       input/ or size_floor/decay/GRM settings change
-                       (content-hash receipts, not timestamps). No edge-list
-                       cache here (no cache/edge_lists/) -- at full-genome
-                       marker density a chromosome's raw pairwise edge list
-                       runs several GiB, so it is never persisted; every
-                       consumer (ld_complexity_reduction(), compute_ld_w())
-                       rebuilds it from the GDS on the fly, one chromosome at
-                       a time, discarded right after use. See the `slide`
-                       comment in R/00_config.R's DEFAULTS for how its default
-                       was calibrated down from compute_LD_decay()'s own 1000
-                       to keep each on-the-fly rebuild small.
-  output/                   gitignored, regenerable:
-    ld_decay/                 decay_summary.csv, decay_print.txt, decay_curves.pdf
-                       -- see "LD-decay report" below. Genotype-only, always
-                       written (like stage1 itself).
-    alignment/                observed.csv, null_draws.csv, null_summary.csv
-                       -- see "Structure-alignment diagnostic" below.
-    pvalues/emmax_unit/     p_obs.rds/p_perm.rds (the unit-level test) plus
-                       p_obs_marker.rds -- a genuine per-marker EMMAX scan
-                       (same GRM, same phenotype), computed purely so the
-                       "unit" engine's plot can show real per-SNP variation
-                       (see snp_results.csv below).
-    pvalues/emmax_simes/    p_obs.rds (every marker) + p_perm_compact.rds
-                       (permutations, restricted to markers whose cluster
-                       clears size_floor -- see "The simes arm's compact
-                       permutation scan" below)
-    stageB_<engine>/     outlier_test.rds, outlier_perm.rds (if a permuted
-                       null was available), region_rotation.rds (if an
-                       annotation was given), snp_results.csv, region_table.csv,
-                       report.txt -- the console text LDscnR's own
-                       print.ld_outlier_test()/print.ld_outlier_perm()/
-                       print.ld_region_rotation() methods already produce,
-                       captured verbatim (no separate summary logic of this
-                       repo's own).
-    figures/manhattan.{png,pdf}                    -- q-value, per engine
-    figures/manhattan_ld_w.{png,pdf}                 -- same panels/layout/
-                       colouring, ld_w_095 (local-LD support, no test
-                       involved) on the y-axis instead
-    floor_sweep_summary.csv, figures/manhattan_floor_sweep.{png,pdf}
-                       -- only after run_floor_sweep().
-    floor_profile/            grid.csv, summary.csv, canonical_regions_unit.csv,
-                       canonical_regions_simes.csv -- only after
-                       run_floor_profile(); see "Floor profile" below.
+    genotypes.rds        required. Numeric dosage matrix (0, 1, 2; NA allowed),
+                         individuals in rows (row names = individual IDs) and
+                         markers in columns (column names = marker IDs).
+    map.rds              required. data.table or data.frame with columns marker,
+                         Chr and Pos. map$marker must equal colnames(genotypes),
+                         in the same order.
+    phenotype.rds        needed for the association scan. Named numeric vector
+                         (names = row names of genotypes), or a one-column
+                         data.frame with those row names.
+    perm_fun.R           required for the association scan. Defines
+                         perm_fun(b, y), which returns one permuted phenotype
+                         for permutation b. There is no default (see below).
+    population.rds       needed for the structure-alignment check. Named
+                         vector from individual to population ID.
+    structure_group.rds  optional. Named vector from individual to a coarser
+                         sampling group (locality or lineage, for example).
+                         Defaults to population.rds when absent.
+    covariate.rds        optional. Named vector from individual to a structure
+                         covariate, such as lineage. When present, the
+                         phenotype is replaced by resid(lm(y ~ covariate))
+                         before EMMAX, and every permuted phenotype is
+                         residualised in the same way.
+    config.R             optional. Plain R that assigns any DEFAULTS name from
+                         R/00_config.R (for example cr_rho <- 0.35) to
+                         override it for this data set only.
+  external_pvalues/      optional. One .rds per extra p-value engine, each a
+                         named numeric vector (names = map$marker). The file
+                         name without .rds is the engine name, so
+                         external_pvalues/lfmm.rds is engine "lfmm".
+  cache/                 written by the workflow and regenerable (see below).
+  output/                written by the workflow and regenerable (see below).
 ```
 
-`snp_results.csv` -- one row per marker in `map`:
+**The permutation function.** There is no default permutation, because what
+"no signal" means depends on each data set's sampling design. A shuffle of
+individuals can, for example, create variation within populations that never
+occurs in the real data. Each data set therefore defines its own
+`perm_fun.R`. The sourced script can use `.dataset_dir`. Both examples use
+`perm_within_groups()` (in `R/01_dataset_io.R`), which reassigns whole
+populations' values among populations in the same structure group. This is
+the structure-preserving permutation used in the manuscript.
 
-| column | meaning |
+**`cache/`** holds the genotype-only results: the SNPRelate genotype file in
+GDS (Genomic Data Structure) format, the LD-decay fit, the Stage-1 units and
+the GRM. They are rebuilt automatically when the inputs or the relevant
+settings change. Pairwise LD edge lists are not stored, because at
+full-genome density one chromosome's edge list can take several gigabytes.
+Every step that needs them rebuilds them from the GDS file, one chromosome at
+a time. The `slide` setting in `R/00_config.R` sets their size.
+
+**`output/`** holds:
+
+| Folder or file | Contents |
+| --- | --- |
+| `ld_decay/` | `decay_summary.csv`, `decay_print.txt`, `decay_curves.pdf` (see [LD-decay report](#ld-decay-report)) |
+| `alignment/` | `observed.csv`, `null_draws.csv`, `null_summary.csv` (see [Structure-alignment check](#structure-alignment-check)) |
+| `pvalues/emmax_unit/` | `p_obs.rds` and `p_perm.rds` for the consensus test, plus `p_obs_marker.rds`, a marker-wise EMMAX scan used only for plotting |
+| `pvalues/emmax_simes/` | `p_obs.rds` for every marker, and `p_perm_compact.rds`, the permutations for markers in tested Stage-1 units only |
+| `stageB_<engine>/` | `outlier_test.rds`, `outlier_perm.rds` (with a permutation null), `region_rotation.rds` (with an annotation), `snp_results.csv`, `region_table.csv` and `report.txt` |
+| `floor_profile/` | `grid.csv`, `summary.csv`, `canonical_regions_unit.csv`, `canonical_regions_simes.csv` (see [Floor profile](#floor-profile)) |
+| `figures/` | `manhattan.{png,pdf}` (q-values) and `manhattan_ld_w.{png,pdf}` (local LD support) |
+| `floor_sweep_summary.csv`, `figures/manhattan_floor_sweep.{png,pdf}` | only after `run_floor_sweep()` |
+
+`report.txt` is the console summary that LDscnR's own print methods produce,
+saved as it is.
+
+### `snp_results.csv`
+
+One row per marker in `map`:
+
+| Column | Meaning |
 | --- | --- |
 | `marker` | Marker ID, from `map$marker`. |
 | `Chr`, `Pos` | Chromosome and position, from `map`. |
-| `statistic` | `"unit"` or `"simes"` (or whatever `statistic` an external engine was run with) -- which arm produced this row. |
-| `marker_p`, `marker_q` | The marker's own raw p-value / BH-adjusted q-value. Only meaningful when `p_obs` is marker-aligned (`statistic = "simes"`, or any external engine); `NA` for `statistic = "unit"`, where no per-marker p-value exists at all. |
-| `unit_p`, `unit_q` | The marker's tested unit's p-value / q-value, broadcast to every member marker. This is what `significant` is decided from, for BOTH statistics. |
-| `p_display`, `q_display` | What `ldm_manhattan()` actually plots. Identical to `marker_p`/`marker_q` when those exist; for `statistic = "unit"`, a genuine per-marker EMMAX scan run purely for display resolution (`p_obs_marker.rds`, see `pvalues/emmax_unit/` above) -- distinct from the flat broadcast `unit_p`, so the "unit" engine's plot still shows real per-SNP variation instead of one flat value per cluster. |
-| `unit_id` | Which Stage-1 cluster (that cleared `size_floor`) this marker belongs to, or `NA` if the marker's cluster didn't clear the floor (never tested). |
-| `region_id` | Which Stage-2 (or physical-merge) region this marker's unit was assembled into, or `NA` if its unit wasn't significant / assembled into any region. String form `"<Chr>:<from>-<to>"`. |
-| `significant` | Whether this marker's unit cleared `alpha` after BH correction. `NA` when `tested` is `FALSE`. |
-| `tested` | Whether this marker's unit cleared `size_floor` and was actually tested (`!is.na(unit_id)`). |
-| `ld_w_095` | Local-LD support at rho = 0.95 (see the LD-decay report section below) -- carried from `map`, identical across every engine's `snp_results.csv` for this dataset (it isn't a property of any one test). |
+| `statistic` | `"unit"` (consensus) or `"simes"`, the test that produced this row. |
+| `marker_p`, `marker_q` | The marker's own p-value and Benjamini-Hochberg (BH) q-value. Defined only for marker-wise p-values (the Simes test or an external engine). `NA` for the consensus test, which has no marker-wise p-value. |
+| `unit_p`, `unit_q` | The p-value and q-value of the marker's Stage-1 unit, copied to every member marker. Significance is decided from these for both tests. |
+| `p_display`, `q_display` | The values that `ldm_manhattan()` plots. They equal `marker_p` and `marker_q` when those exist. For the consensus test they come from the separate marker-wise EMMAX scan (`p_obs_marker.rds`), so the plot shows variation between markers instead of one flat value per unit. |
+| `unit_id` | The marker's tested Stage-1 unit, or `NA` if its unit is smaller than the floor and was not tested. |
+| `region_id` | The marker's outlier region, as `"<Chr>:<from>-<to>"`, or `NA` if its unit was not significant. |
+| `significant` | Whether the marker's unit is significant at `alpha` after BH correction. `NA` when `tested` is `FALSE`. |
+| `tested` | Whether the marker's unit reached the floor and was tested (`!is.na(unit_id)`). |
+| `ld_w_095` | Local LD support at rho = 0.95 (see [LD-decay report](#ld-decay-report)). It depends only on the genotypes, so it is the same in every engine's file. |
 
-Assignment to `unit_id`/`region_id` is by EXACT
-MEMBERSHIP at both levels, never by whether a marker's or unit's coordinate
-falls inside a bounding span -- Stage-1 clusters AND the Stage-2 groups
-`assembly = "stage2_discovered"` merges them into are both membership-based,
-not necessarily contiguous, so a wide span can physically contain markers/
-units that actually belong to a different, interleaved cluster or group.
-Two related bugs from this, both caught by an external audit and fixed (see
-`R/04_stage_B_outlier.R`'s header): joining markers to units by coordinate
-mislabelled thousands of markers; separately, even after that fix, joining
-a unit's span to a region's span stayed ambiguous whenever assembled
-regions overlap physically (quantified: several significant units in each
-worked example fit inside more than one region's bounds). `region_id` for
-`assembly = "stage2_discovered"` is now recovered by rerunning
-`ld_outlier_test()`'s own internal `ld_prune_and_eMLG()` call
-(`.stage2_unit_to_region()`) to get the real group membership, not a span
-join; `assembly = "physical"` keeps the span join, which is exact there
-(its regions are gap-merged directly from the units' own spans, so they
-cannot overlap). Every column is also assigned either directly onto a
-freshly-`map`-ordered table (before anything can reorder it) or via a
-name-keyed update-join, never via a row-order-dependent `merge()` +
-manual resort -- an external audit reproduced a marker/p-value swap on a
-two-marker case under the earlier approach, which never actually required
-`map` to be position-sorted despite silently assuming it was.
+Markers are assigned to `unit_id` and `region_id` by Stage-1 and Stage-2
+membership, not by coordinates. Stage-1 units and outlier regions are not
+always physically contiguous, so a region's span can contain markers that
+belong to another unit or region.
 
-`region_table.csv` -- one row per assembled region for this engine (the
-`test$regions` LDscnR's `ld_outlier_test()` returns, written as-is):
+### `region_table.csv`
 
-| column | meaning |
+One row per outlier region for this engine, as returned by LDscnR's
+`ld_outlier_test()`:
+
+| Column | Meaning |
 | --- | --- |
-| `Chr`, `from`, `to` | The region's genomic span (bp). |
-| `n_units` | How many of this engine's significant units were assembled into this region. |
-| `n_markers` | How many markers belong to this region's own assembled units (or group, for `assembly = "stage2_discovered"`). |
-| `occupancy` | `n_markers` divided by how many markers on `map` physically fall within `[from, to]`. 1.0 means every marker in the region's own physical span actually belongs to it; lower values mean other, unrelated markers are interleaved within the same bounding box -- a lower-occupancy region is a looser, less contiguous signal. |
+| `Chr`, `from`, `to` | The region's span in base pairs. |
+| `n_units` | The number of significant Stage-1 units assembled into the region. |
+| `n_markers` | The number of markers in those units. |
+| `occupancy` | `n_markers` divided by the number of markers in `map` between `from` and `to`. A value of 1 means every marker in the span belongs to the region. Lower values mean that other markers are interleaved, so the signal is less contiguous. |
 
-Config precedence: `R/00_config.R`'s `DEFAULTS` < dataset `input/config.R` <
-an explicit `cfg =` argument at the call site.
+## Configuration and the floor
 
-`size_floor` defaults to a DERIVED value -- marker density divided by 250,
-i.e. 1 unit of floor per 250 markers per Mb of assayed sequence
-(`size_floor_markers_per_mb` in `DEFAULTS`), rounded. Density is the number
-of markers over the summed per-chromosome span in `map.rds`. Because it is a
-density rather than a count, a subset of chromosomes gets the same floor as
-the full panel: 8 on the ~790k-marker three-spined panel and on its
-two-chromosome example, 12 on the nine-spined panel. Never below **2** regardless of that derivation, though, or of an
-explicit override in `DEFAULTS`/a dataset's own `config.R`: a singleton
-cluster (`size_floor = 1`) is a single marker's own sampling noise with
-nothing to average it against, the single most effect-size-inflated unit
-this pipeline could test, and is excluded unconditionally. Set `size_floor`
-explicitly to pin it instead of deriving it (still clamped to `>= 2`).
+Settings are resolved in this order, with later ones taking precedence:
+`DEFAULTS` in `R/00_config.R`, then the data set's `input/config.R`, then a
+`cfg =` argument in the function call. The manual lists every setting.
+
+The minimum Stage-1 unit size (the floor, `size_floor`) is derived from
+marker density unless it is set explicitly. The floor is the number of
+markers per Mb divided by 250 (`size_floor_markers_per_mb`), rounded. Density
+is the number of markers divided by the summed span of the chromosomes in
+`map.rds`. Because it is a density rather than a count, a subset of
+chromosomes gets the same floor as the full panel. The floor is 8 for the
+three-spined panel (about 2,080 markers per Mb) and for its two-chromosome
+example, and 12 for the nine-spined panel (about 2,960 markers per Mb). The
+floor is never below two, even when it is set explicitly. A single-marker
+unit has nothing to average its sampling noise against, so its effect size
+is the most inflated.
 
 ## LD-decay report
 
-`report_ld_decay(dataset_dir)` writes out the `LD_decay` object
-`build_stage1()` already computes and caches (`compute_LD_decay()`) -- purely
-a reporting layer, no recomputation. Genotype-only, so it runs automatically
-inside `run_dataset()` unconditionally, the same as stage1 itself:
+`report_ld_decay(dataset_dir)` writes out the LD-decay fit that
+`build_stage1()` computes with LDscnR's `compute_LD_decay()`. It recomputes
+nothing and depends only on the genotypes, so `run_dataset()` always runs it.
 
-- `decay_summary.csv` -- `LD_decay$decay_sum`, one row per chromosome:
+`decay_summary.csv` has one row per chromosome:
 
-  | column | meaning |
-  | --- | --- |
-  | `Chr` | Chromosome. |
-  | `chr_size` | Chromosome span (bp), `max(Pos)` on this chromosome. |
-  | `n_snp_chr` | Number of markers on this chromosome. |
-  | `bp_per_snp` | `chr_size / (n_snp_chr - 1)` -- average marker spacing, used to convert every SNP-count column below to/from bp. |
-  | `a`, `c`, `b` | This chromosome's OWN fitted decay-curve parameters for `r2 ~ b + (c - b) / (1 + a * d)`: `a` is the decay rate (larger = faster decay), `c` the short-range asymptote, `b` the genome-wide background LD floor (same value every row). |
-  | `a_pred`, `c_pred` | The genome-wide, chromosome-size-predicted values (a robust regression of `log(a)` on `log(chr_size)` across every chromosome) -- what `ld_w_095` and `decay_curves.pdf`'s "size-predicted" curve actually use, not this chromosome's own noisier `a`/`c`. |
-  | `n_w_used` | How many of this chromosome's sliding windows cleared the "structured" contrast-over-background gate and were used to fit `a`/`c`. |
-  | `rho_slide_raw`, `rho_slide_pred` | The LD retention (`rho`) the CURRENT `slide` setting actually covers, using this chromosome's own `a` / the size-predicted `a_pred`. |
-  | `slide_bp_rho_<X>`, `slide_snp_rho_<X>` | For each target in `rho_targets` (default 0.90/0.95/0.99): the physical window (bp) / marker-count window (SNPs) needed to retain that much LD, using `a_pred`. This is the number the `slide` default in `R/00_config.R` was calibrated against (see its comment there). |
-
-- `decay_print.txt` -- `print(LD_decay)`'s own console output, captured
-  verbatim (LDscnR already has `print.ld_decay()`; this repo doesn't
-  reimplement a summary, just persists what that method already reports).
-- `decay_curves.pdf` -- LDscnR's own `plot.ld_decay()` (not a custom plot):
-  one genome-wide `type = "summary"` page (decay rate vs. chromosome size,
-  rho covered by the current slide, informative windows per chromosome,
-  recommended slide sizes), then one `type = "chr"` page per chromosome
-  (window-wise `a`, window-wise `c`, LD contrast across windows, and the
-  fitted decay curves themselves against the pooled per-window points). A
-  chromosome whose own decay disagrees with what its size alone would
-  predict -- an inversion, a region of suppressed recombination -- is
-  visible directly on its own page.
-
-The same "own print.* method, captured, not reimplemented" pattern applies
-to Stage B: `run_stage_B()` already called `print(test)`/`print(perm)`/
-`print(rotation)` (LDscnR's `print.ld_outlier_test()`/`print.ld_outlier_perm()`/
-`print.ld_region_rotation()`) for console progress; that same text is now
-also captured into `output/stageB_<engine>/report.txt`.
-
-## Structure-alignment diagnostic
-
-`check_structure_alignment(dataset_dir)` -- generalised from
-`LDscnR-paper/module_9sp/R/02b_env_structure_alignment.R`, the script that
-actually produces the manuscript's empirical alignment numbers (confirmed
-via `LDscnR_manuscript/generate_empirical_values.R`) -- asks, before any
-association test runs, how much of the tested phenotype is explained by (a)
-`structure_group.rds` (the sampling groups a permutation null would shuffle
-within) and (b) the leading axes of the population-level GRM. A WARNING
-diagnostic, not a gate: per the manuscript's own framing, it "reveals when
-phenotype and ancestry provide nearly interchangeable explanations," it does
-not itself invalidate a result. Runs automatically inside `run_dataset()`
-whenever `input/population.rds` exists. Verified to reproduce the
-manuscript's published structure-based numbers exactly on both worked
-examples (3sp: 5.4%/11.1%; 9sp: 54.8%/72.2%) -- the GRM-axis numbers differ
-from the manuscript's own (computed genome-wide) since these examples' GRM
-is built from only two chromosomes.
-
-Three files, `output/alignment/`:
-
-`observed.csv` -- one row, the observed alignment measures:
-
-| column | meaning |
+| Column | Meaning |
 | --- | --- |
-| `n_individuals`, `n_populations`, `n_structure_groups` | Sample sizes: individuals, distinct `population.rds` values, distinct `structure_group.rds` values. |
-| `grm_axes_r2_population` | R² of population-mean phenotype ~ the top `n_axes` eigenvectors of the population-level GRM. |
-| `grm_axes_adjusted_r2_population` | Same, adjusted R² (penalised for `n_axes`). |
-| `structure_r2_population` | R² of population-mean phenotype ~ `structure_group`, population-weighted (one point per population). |
-| `structure_r2_individual_weighted` | Same, individual-weighted (one point per individual -- populations with more individuals count more). |
+| `Chr` | Chromosome. |
+| `chr_size` | Chromosome span in base pairs (`max(Pos)`). |
+| `n_snp_chr` | Number of markers on the chromosome. |
+| `bp_per_snp` | Average marker spacing, `chr_size / (n_snp_chr - 1)`, used to convert marker counts to base pairs. |
+| `a`, `c`, `b` | The chromosome's fitted parameters of the decay curve r² = b + (c - b) / (1 + a·d), where d is distance. `a` is the decay rate (larger means faster decay), `c` the short-range level, and `b` the genome-wide background LD (the same in every row). |
+| `a_pred`, `c_pred` | The values predicted from chromosome size by a robust regression of log(a) on log(chr_size) across chromosomes. `ld_w_095` and the size-predicted curve in `decay_curves.pdf` use these. With fewer than three distinct chromosome sizes, as in the two-chromosome examples, the regression cannot be fitted and the median of `a` is used. |
+| `n_w_used` | The number of windows on the chromosome that passed the contrast-over-background check and were used in the fit. |
+| `rho_slide_raw`, `rho_slide_pred` | The share of LD (rho) that the current `slide` setting retains, using `a` and `a_pred`, respectively. |
+| `slide_bp_rho_<X>`, `slide_snp_rho_<X>` | For each target in `rho_targets` (default 0.99), the window in base pairs and in markers needed to retain that share of LD, using `a_pred`. |
 
-`null_draws.csv` -- one row per (scheme, draw): `scheme` (`"within-group
-permutation"` or `"GRM-matched continuous"`), `draw` (1..`n_draws`), and that
-draw's own `grm_axes_r2_population`/`structure_r2_population`/
-`structure_r2_individual_weighted` (same definitions as `observed.csv`,
-recomputed on the null-shuffled/null-surrogate phenotype).
+`decay_print.txt` is the console output of LDscnR's `print.ld_decay()`.
+`decay_curves.pdf` is LDscnR's `plot.ld_decay()`. Its first page summarises
+the whole genome (decay rate against chromosome size, LD retained by the
+current `slide`, informative windows per chromosome and recommended `slide`
+sizes). Each chromosome then gets a page with its window-wise fits. A
+chromosome whose decay differs from what its size predicts, because of an
+inversion or suppressed recombination, stands out on its page.
 
-`null_summary.csv` -- one row per (scheme, metric), `observed.csv`'s three
-measures compared against their null distribution:
+## Structure-alignment check
 
-| column | meaning |
+`check_structure_alignment(dataset_dir)` asks, before any association test,
+how much of the phenotype is explained by (a) `structure_group.rds`, the
+sampling groups within which the permutation null shuffles, and (b) the
+leading axes of the GRM computed between populations. It follows the
+manuscript's alignment analysis. It is a warning, not a gate. As the
+manuscript puts it, the check shows when phenotype and ancestry offer nearly
+interchangeable explanations, but it does not invalidate a result.
+`run_dataset()` runs it when both `input/population.rds` and
+`input/phenotype.rds` exist. It uses the raw phenotype, not the phenotype
+adjusted for `covariate.rds`. On both two-chromosome examples it reproduces
+the manuscript's values for structure groups (three-spined: 5.4% weighted by
+population and 11.1% weighted by individual; nine-spined: 54.8% and 72.2%).
+The values for the GRM axes differ from the manuscript's, because the
+examples' GRM comes from two chromosomes only.
+
+It writes three files to `output/alignment/`.
+
+`observed.csv` has one row with the observed measures:
+
+| Column | Meaning |
 | --- | --- |
-| `scheme`, `metric` | Which null, and which of the three measures. |
-| `observed` | The observed value (from `observed.csv`). |
-| `null_mean`, `null_median`, `null_sd` | That null distribution's own summary. |
-| `null_q025`, `null_q975` | The null's 2.5th/97.5th percentile. |
-| `observed_within_null95` | Whether `observed` falls inside `[null_q025, null_q975]` -- if `TRUE`, the observed alignment is not distinguishable from this null. |
-| `proportion_null_ge_observed` | One-sided p-value-like quantity: fraction of null draws at least as large as `observed`. Low = observed alignment is unusually strong relative to this null. |
+| `n_individuals`, `n_populations`, `n_structure_groups` | The numbers of individuals, populations and structure groups. |
+| `grm_axes_r2_population` | R² of the population-mean phenotype regressed on the top `n_axes` eigenvectors (default five) of the between-population GRM. |
+| `grm_axes_adjusted_r2_population` | The same, as adjusted R². |
+| `structure_r2_population` | R² of the population-mean phenotype regressed on `structure_group`, with one point per population. |
+| `structure_r2_individual_weighted` | The same with one point per individual, so populations with more individuals count more. |
 
-## The "simes" arm's compact permutation scan
+`null_draws.csv` has one row per null scheme and draw (`n_draws`, default
+1,000). It holds the same three measures computed on a permuted phenotype
+(`"within-group permutation"`) or on a continuous surrogate matched to the
+GRM (`"GRM-matched continuous"`).
 
-`run_stage_A()`'s "simes" arm tests every marker directly (unlike "unit",
-which tests one summary variable per cluster) -- but a marker only ever
-contributes to a tested unit's Simes p-value once its own cluster clears
-`size_floor` (LDscnR's `.ld_outlier_units()`/`.ld_outlier_tested_units()`).
-On a small panel that is nearly every marker; at full-genome scale it can be
-a tiny fraction -- on the full 3sp panel (`LDscnR-paper/module_3sp`), 16,890
-of 790,578 markers (2.1%) sit in a cluster clearing `size_floor = 8`.
-Rescanning the other 97.9% on every one of `b_simes` permutations was pure
-waste, and the dominant memory/runtime cost at full-genome scale: found by
-timing a full-genome run, where it drove free memory below 200 MB via
-`emmax_setup()`'s per-permutation working object (multiplied further by
-`cores > 1`'s forked workers, each holding their own copy).
+`null_summary.csv` compares each observed measure with its null:
 
-The fix, verified to give bit-for-bit identical results to the old
-unrestricted scan (`stage1$clusters`'s membership provably never lets an
-ineligible marker's value be read): the **observed** scan
-(`p_obs.rds`) still covers every marker, unchanged -- it is also
-`marker_p`/`p_display`'s source, needed for full genome-wide manhattan
-resolution regardless of which markers are ever tested. Only the
-**permutation** scan is restricted, to markers whose cluster clears
-`size_floor`, and saved compact (`p_perm_compact.rds`, rows = only those
-markers, `rownames()` giving each one). `run_stage_B()` expands it back to
-the full-length, `NA`-padded form `ld_outlier_perm()` requires only
-transiently, per surrogate (`.simes_perm_accessor()`) -- a dense
-markers-by-`B` matrix is never held in memory or written to disk. `NA`
-outside the eligible rows is safe and never actually read: exactly the
-markers a tested unit's members can be drawn from.
-
-This makes the "simes" arm's permutation scan floor-DEPENDENT where it
-previously wasn't (`simes_floor`, a parameter to `run_stage_A()` separate
-from `cfg$size_floor`, defaulting to it) -- it is part of that arm's own
-receipt params, so a later call at a lower floor (needing a strictly larger
-eligible set) correctly invalidates an earlier, narrower scan.
-`run_floor_sweep()` accounts for this: every floor in a sweep requests
-`simes_floor = min(floors)`, since a lower floor only ever makes MORE
-markers eligible, so one compact scan at the sweep's own minimum floor is a
-superset covering every higher floor tested afterward too -- preserving the
-"simes is cheap to reuse across a floor sweep" design this arm has always
-had.
-
-## size_floor sensitivity sweep
-
-`run_floor_sweep(dataset_dir, factors = c(0.5, 1, 2))` reruns Stage A/B at
-each of `cfg$size_floor`'s half/default/double (deduplicated by resolved
-integer value -- on a small panel where the floor already derives to 1, the
-"half" point collapses onto the default rather than wasting a repeat). Only
-the "unit" arm is genuinely expensive to sweep (`ld_unit_matrix()`'s columns
-depend on `size_floor`, so its permutations must be redone per floor); the
-"simes" arm's Stage-A scan doesn't depend on `size_floor` at all, so it's
-computed once and reused, receipt-deduplicated, across every floor. Not
-wired into `run_dataset()`'s default flow -- call it separately when you
-want the extra robustness check.
-
-`floor_sweep_summary.csv` -- one row per (floor, statistic):
-
-| column | meaning |
+| Column | Meaning |
 | --- | --- |
-| `floor` | The resolved integer `size_floor` this row used. |
-| `statistic` | `"unit"` or `"simes"`. |
-| `n_units_tested` | How many units cleared this floor and were tested. |
-| `n_significant` | How many of those were significant at `alpha`. |
-| `n_regions` | How many regions the significant units assembled into. |
+| `scheme`, `metric` | The null scheme and the measure. |
+| `observed` | The observed value. |
+| `null_mean`, `null_median`, `null_sd` | Summary of the null distribution. |
+| `null_q025`, `null_q975` | The 2.5th and 97.5th percentiles of the null. |
+| `observed_within_null95` | `TRUE` if the observed value lies between those percentiles, so it cannot be distinguished from the null. |
+| `proportion_null_ge_observed` | The fraction of null draws at least as large as the observed value. Low values mean the observed alignment is unusually strong. |
 
-## Floor profile: stability labels for the reported regions
+## Floor profile
 
-`run_floor_profile(dataset_dir, factors = c(0.5, 2))` labels every region
-reported at the dataset's floor (`cfg$size_floor`, by default the
-marker-density rule) by whether it is also found at **half** and at **twice**
-that floor: `"3/3"` (found at both), `"2/3"` (one) or `"1/3"` (neither). For
-the three-spined example (floor 8) the comparison floors are 4 and 16. The
-low floor may be 1 (singletons included); it is a comparison floor only,
-never the reported one.
+`run_floor_profile(dataset_dir, factors = c(0.5, 2))` labels each outlier
+region found at the reported floor by whether it is also recovered at half
+and at twice that floor. The labels are `"3/3"` (recovered at both),
+`"2/3"` (at one) and `"1/3"` (at neither). For the three-spined panel, with a
+floor of 8, the comparison floors are 4 and 16. The low comparison floor may
+be 1 (single markers included), but it is used only for comparison.
 
-**`run_dataset()` calls this automatically (`floor_profile = TRUE` by
-default).** It never changes the reported floor; pass `floor_profile =
-FALSE` to skip the labels.
+`run_dataset()` runs the floor profile by default. It never changes the
+reported floor, so `floor_profile = FALSE` only skips the labels.
 
-**Why 0.5x and 2x.** In the LDscnR paper's simulations (600 runs with known
-causal variants), regions reported at the density floor had precision of
-about 0.2 when found at only that floor, 0.5 when also found at one
-comparison floor and 0.8 when found at both. Dropping 1/3 regions cost
-almost no recall, and recovery at the **lower** floor -- where the BH burden
-is larger -- was the more informative check. In the three-spined panel, the
-EcoPeak enrichment was carried by regions recovered at a second floor.
+**Recovery rule.** A region is recovered at a comparison floor when at least
+one of its significant Stage-1 units is also significant at that floor and
+the region overlaps an outlier region assembled at that floor. This is the
+manuscript's rule. Units are matched across floors by their representative
+marker (`core_snp`), because `unit_id` is only an index into one floor's own
+list of tested units.
 
-**Cost.** The reported floor runs Stage A/B exactly as before, with
-permutations and (if `annotation` is given) `ld_region_rotation()`. The
-comparison floors are observed only (`run_stage_B(observed_only = TRUE)`,
-which never loads a cached permutation file): the consensus arm is fitted
-once more, at the low floor, and the high floor reuses those unit p-values
-for its subset of clusters -- a unit's EMMAX p-value does not depend on which
-other units are tested, so only BH correction and Stage-2 assembly are
-repeated. The "simes" arm reuses the floor-independent marker scan at every
-floor.
+**Why half and twice the floor.** In the manuscript's simulations (600 runs
+with known causal variants and a floor of two), the precision of outlier
+regions was about 0.2 for regions labelled 1/3, about 0.5 for 2/3 and about
+0.8 for 3/3. Dropping 1/3 regions cost little recall. Recovery at the lower
+floor, where more units are tested and the BH threshold is harder to reach,
+was the more informative check. In the three-spined panel, the EcoPeak
+enrichment (the overlap with the marine-freshwater differentiated regions of
+Kingman et al. 2021) was carried by regions recovered at a second floor.
 
-**Regions are matched across floors by Stage-1 cluster identity, not by
-physical span overlap.** A unit's own `unit_id` is a position index into that
-floor's own size_floor-filtered cluster subset, and is *not* comparable
-across floors -- two different clusters can both be "unit_id 5" at two
-different floors. Each cluster's `core_snp` (its representative marker,
-assigned once during clustering, independent of any floor) is stable, and is
-what "is this canonical region's cluster also significant at the other floor"
-is actually asked about. Physical span overlap is used only as a secondary
-sanity check on a recovered hit.
+**Cost.** The reported floor runs the association scan and unit testing
+exactly as `run_dataset()` does, with permutations and, if an annotation is
+given, the relocation test. The comparison floors are tested on the observed
+data only (`run_stage_B(observed_only = TRUE)`). The consensus test is fitted
+once more, at the low floor. The units of the high floor are a subset of those
+of the low floor, and a unit's EMMAX p-value does not depend on which other
+units are tested. The high floor therefore reuses those p-values, and only
+the BH correction and Stage-2 assembly are repeated. The Simes test reuses
+the marker-wise scan at every floor.
 
-Four output files under `output/floor_profile/`:
+It writes four files to `output/floor_profile/`.
 
-`grid.csv` -- one row per floor: `role` (low/reported/high), `floor`,
-`achieved_reduction` (fraction of per-marker tests avoided),
-`n_units_tested`, `marker_coverage`.
+`grid.csv` has one row per floor: `role` (low, reported or high), `floor`,
+`achieved_reduction` (the fraction of marker-wise tests avoided),
+`n_units_tested` and `marker_coverage`.
 
-`summary.csv` -- one compact row per method (`unit`/`simes`): `floor_low`,
-`floor`, `floor_high` and their `reduction_*`, the reported floor's
-`n_units_tested`, `n_significant`, `n_regions`, and the number of regions in
-each tier (`n_tier_1`, `n_tier_2`, `n_tier_3`).
+`summary.csv` has one row per test (`unit` or `simes`): the three floors and
+their reductions, the number of units tested, significant units and outlier
+regions at the reported floor, and the number of regions in each tier
+(`n_tier_1`, `n_tier_2`, `n_tier_3`).
 
-`canonical_regions_unit.csv`/`canonical_regions_simes.csv` -- one row per
-**canonical-floor** region (never a region found only at a side floor -- this
-is about how robust the primary, reported findings are, not a census of
-every floor's own discoveries):
+`canonical_regions_unit.csv` and `canonical_regions_simes.csv` have one row
+per outlier region at the reported floor. Regions found only at a comparison
+floor are not listed, because the profile describes how robust the reported
+regions are.
 
-| column | meaning |
+| Column | Meaning |
 | --- | --- |
-| `region_id`, `Chr`, `from`, `to`, `span` | The canonical region's own identity and physical extent. |
-| `tick_<floor>` | TRUE if this region's cluster(s) are *also* a significant unit at that side floor. A cluster whose `n_loci` doesn't clear a side floor is simply not tested there, which correctly reads as not-recovered -- this is not a bug, it's what floor selection means. |
-| `overlap_check_<floor>` | Secondary sanity check, only meaningful when the tick above is TRUE: does that side floor's own region (containing the recovered cluster) physically overlap this canonical region's span? Almost always TRUE; a FALSE here is a genuine anomaly worth a human look, not expected behaviour. |
-| `n_ticks`, `stability_tier` | How many of the 3 floors (canonical + 2 side) found this region -- `"3/3"`, `"2/3"`, or `"1/3"` (never `"0/3"`, since every row starts from a canonical, already-found region). |
+| `region_id`, `Chr`, `from`, `to`, `span` | The region and its span. |
+| `tick_<floor>` | `TRUE` if the region is recovered at that comparison floor. A unit smaller than a comparison floor is not tested there, so it cannot be recovered there. |
+| `n_ticks`, `stability_tier` | The number of floors, out of three, at which the region is found, as a number and as `"3/3"`, `"2/3"` or `"1/3"`. |
 
-**The tier is a robustness label, not a significance measure** -- never a
-p-value, FDR estimate or independent replication: every floor analyses the
-same data, and only the reported floor gets the structure-aware permutation
-null. Its meaning comes from the simulation calibration above, not from a
-test at each floor.
+**The tier is a robustness label, not a measure of significance.** It is not
+a p-value, a false discovery rate (FDR) or an independent replication,
+because every floor analyses the same data and only the reported floor gets
+the structure-preserving permutation null. Its meaning comes from the
+simulations above.
 
-`run_floor_profile()` itself is not wired into `run_all()`; a user wanting a
-multi-dataset profile calls it per dataset the same way `run_all()` calls
-`run_dataset()`, and `rbindlist()`s the returned `summary` tables.
+`run_all()` gets the labels through `run_dataset()`. To profile many data
+sets without the rest of the workflow, call `run_floor_profile()` for each
+and combine the returned `summary` tables with `rbindlist()`.
 
-**Manhattan labels show the stability tier directly** (`ldm_manhattan()`,
-R/05_manhattan.R): whenever `output/floor_profile/canonical_regions_<statistic>.csv`
-exists for an engine's own statistic ("emmax_unit" -> "unit", "emmax_simes"
--> "simes"), that region's label gets the tier appended -- `"R5 (3/3)"`
-instead of plain `"R5"`. Matched on that engine's own `region_id` (the peak
-labelled marker's), not the cross-engine `locus_id` `.master_loci()` may have
-widened by merging several engines' regions together. External engines (e.g.
-an `lfmm.rds` in `external_pvalues/`) have no floor-profile concept and keep
-plain, unsuffixed labels regardless. Nothing needs to be passed to
-`ldm_manhattan()` for this -- it looks for the file itself, so it appears
-automatically once `run_floor_profile()` (directly, or via `run_dataset()`'s
-own default) has run for that dataset.
+`ldm_manhattan()` adds the tier to the labels of the consensus and Simes
+panels whenever `output/floor_profile/canonical_regions_<statistic>.csv`
+exists, for example `"R5 (3/3)"` instead of `"R5"`. External engines, such as
+LFMM, have no floor profile and keep plain labels.
 
-## Every stage is receipt-gated
+## Simes permutations at full-genome scale
 
-Every stage (`build_stage1()`, `run_stage_A()`, each `run_stage_B()` engine,
-`check_structure_alignment()`) hashes its own inputs and parameters into
-`_receipt.rds` next to its output, and skips recomputing when nothing has
-changed -- content hashes, not timestamps, so a `git checkout` or a copied
-file can't produce a false "unchanged". Calling `run_dataset()`/`run_all()`
-again on unchanged datasets is a no-op walk over receipts. Pass `force =
-TRUE` to rebuild regardless. A receipt is also treated as stale (not just
-"unchanged params/inputs") when: a recorded output file no longer exists on
-disk (an output manually deleted, or a stage that wrote fewer optional
-outputs than an earlier receipt promised); or LDscnR's own source has moved
-since the receipt was written (recorded in every receipt, not just checked
-at call time -- see "LDscnR version" below). `run_stage_A()`'s own receipt
-additionally depends on `build_stage1()`'s receipt, and `run_stage_B()`'s
-params include a content digest of any directly-supplied `p_obs`/`p_perm`/
-`annotation`/`chrom_lengths` (not just their source file, when they have
-one) -- both closing gaps an external audit found: a changed LD-decay
-setting could otherwise rebuild Stage 1 while Stage A kept stale p-values,
-and two calls passing different p-values under the same engine name could
-otherwise false-positive as "up to date".
+The Simes test computes a p-value for every marker, but a marker only
+contributes to a tested unit when its Stage-1 unit reaches the floor. In the
+full three-spined panel, 16,890 of 790,578 markers (2.1%) are in units of at
+least eight markers. The observed scan (`p_obs.rds`) still covers every
+marker, because the Manhattan plot needs them. The permutation scan, however,
+is restricted to the markers in tested units and saved in compact form
+(`p_perm_compact.rds`, with one row per eligible marker). `run_stage_B()`
+expands it one permutation at a time, so a dense matrix of all markers by all
+permutations is never held in memory. The results are identical to an
+unrestricted scan.
+
+The permutation scan therefore depends on the floor. `run_stage_A()` takes
+`simes_floor` (by default `cfg$size_floor`), and a call with a lower floor
+rebuilds the scan. `run_floor_sweep()` and `run_floor_profile()` request the
+lowest floor they need once and reuse that scan for the higher floors.
+
+## Floor sensitivity sweep
+
+`run_floor_sweep(dataset_dir, factors = c(0.5, 1, 2))` reruns the association
+scan and unit testing, with full permutations, at half, one and two times the
+floor. Each floor is at least two, and factors that give the same floor are
+run once. The consensus test is expensive to sweep, because its tested units,
+and therefore its permutations, change with the floor. The Simes test reuses
+one marker-wise scan. `run_dataset()` does not run the sweep, so call it
+separately when you want this more thorough check.
+
+`floor_sweep_summary.csv` has one row per floor and test, with the columns
+`floor`, `statistic`, `n_units_tested`, `n_significant` and `n_regions`.
+
+## Receipts: every step is skipped when nothing changed
+
+Every step (`build_stage1()`, `run_stage_A()`, each `run_stage_B()` engine
+and `check_structure_alignment()`) saves a hash of its inputs and settings in
+`_receipt.rds` next to its output. It skips the work when nothing has
+changed. The floor profile and the floor sweep are made of these steps, so
+they use the same receipts. The hashes are of file contents, not timestamps, so
+a `git checkout` or a copied file cannot make a step look unchanged. Running
+`run_dataset()` or `run_all()` again on unchanged data sets only reads the
+receipts. Pass `force = TRUE` to rebuild anyway.
+
+A receipt is also out of date when:
+
+- one of its recorded output files is missing;
+- the LDscnR revision has changed since it was written (see
+  [LDscnR version](#ldscnr-version));
+- for the association scan, the Stage-1 receipt has changed;
+- for unit testing, p-values or annotations passed directly to
+  `run_stage_B()` differ in content from those recorded.
 
 ## Batch summary (`run_all()`)
 
-`run_all(dataset_dirs)` loops `run_dataset()` over every folder, isolates one
-dataset's failure from the rest (`status = "error"`, not an abort -- see
-`stop_on_error`), and writes two roll-up CSVs.
+`run_all(dataset_dirs)` runs `run_dataset()` on every folder. A failing data
+set is recorded with `status = "error"` and the others still run (see
+`stop_on_error`). It writes two summary files.
 
-`summary.csv` -- one row per (dataset, engine):
+`summary.csv` has one row per data set and engine:
 
-| column | meaning |
+| Column | Meaning |
 | --- | --- |
 | `dataset` | `basename(dataset_dir)`. |
-| `engine` | Which p-value engine this row is for (`emmax_unit`, `emmax_simes`, or an external engine's name). `NA` if the dataset had no engine to run, or errored before reaching one. |
-| `n_markers` | Total markers in this dataset's `map`. |
-| `n_units_tested`, `n_significant`, `n_regions` | Same meaning as `floor_sweep_summary.csv`'s columns, for this engine's actual (non-swept) run. |
-| `runtime_s` | Wall-clock seconds for this dataset's whole `run_dataset()` call (shared across every engine row for that dataset -- it isn't per-engine timing). |
-| `status` | `"ok"`, `"no_engine"` (ran, but had no p-value source), or `"error"`. |
-| `error` | The error message, when `status = "error"`; `NA` otherwise. |
-| `align_grm_axes_r2`, `align_grm_axes_p`, `align_structure_r2`, `align_structure_p` | The two headline structure-alignment numbers (see below), repeated onto every engine row for this dataset so a screen of many datasets can sort/filter on association results and confounding risk at once. All `NA` when the dataset has no `input/population.rds`. |
+| `engine` | The p-value engine (`emmax_unit`, `emmax_simes` or an external engine). `NA` if the data set had no engine or failed before reaching one. |
+| `n_markers` | The number of markers in the data set's `map`. |
+| `n_units_tested`, `n_significant`, `n_regions` | Units tested, significant units and outlier regions for this engine at the reported floor. |
+| `runtime_s` | Wall-clock seconds for the whole `run_dataset()` call. It is the same on every row of a data set. |
+| `status` | `"ok"`, `"no_engine"` (the data set ran but had no p-values to test) or `"error"`. |
+| `error` | The error message when `status = "error"`, and `NA` otherwise. |
+| `align_grm_axes_r2`, `align_grm_axes_p`, `align_structure_r2`, `align_structure_p` | The two main structure-alignment measures and their tail proportions, repeated on every row of the data set, so that many data sets can be sorted on association results and on the risk of confounding at once. `NA` without `input/population.rds`. |
 
-The four `align_*` columns are the **"within-group permutation" scheme**
-only (the manuscript's primary null) for two of `null_summary.csv`'s
-metrics: `align_grm_axes_r2`/`align_structure_r2` are that metric's
-`observed` value, and `align_grm_axes_p`/`align_structure_p` are its
-`proportion_null_ge_observed` -- low values flag a phenotype whose signal is
-hard to distinguish from ancestry/sampling structure alone.
+The four `align_*` columns use the within-group permutation null, the
+manuscript's primary null. `align_grm_axes_r2` and `align_structure_r2` are
+the observed values, and `align_grm_axes_p` and `align_structure_p` are the
+corresponding `proportion_null_ge_observed`. Low values flag a phenotype
+whose signal is hard to separate from ancestry or sampling structure.
 
-`alignment_summary.csv` -- one row per dataset with `input/population.rds`
-(the detailed companion to `summary.csv`'s four headline columns): `dataset`,
-then every `observed.csv` column (see "Structure-alignment diagnostic"
-above), then three columns per (scheme, metric) pair from `null_summary.csv`,
-named `<scheme>__<metric>__null_mean`, `<scheme>__<metric>__observed_within_null95`,
-`<scheme>__<metric>__proportion_null_ge_observed` (`scheme` with any
-non-alphanumeric characters collapsed to `_`, e.g.
-`within_group_permutation__structure_r2_population__null_mean`).
+`alignment_summary.csv` has one row per data set with `input/population.rds`.
+It holds `dataset`, every column of `observed.csv` and three columns for each
+scheme and measure in `null_summary.csv`, named
+`<scheme>__<metric>__null_mean`, `<scheme>__<metric>__observed_within_null95`
+and `<scheme>__<metric>__proportion_null_ge_observed`. Characters other than
+letters and digits in the scheme name become `_`, for example
+`within_group_permutation__structure_r2_population__null_mean`.
 
 ## LDscnR version
 
-`R/00_config.R` records the validated GitHub commit. `check_ldscnr()`
-checks the installed package's GitHub revision before a dataset runs; an
-older or non-GitHub installation stops the batch. Reinstall the revision in
-the quick start if that happens. A version number alone is not enough,
-because package code can change without a version bump.
+`R/00_config.R` records the validated LDscnR GitHub commit (tag `v0.9.1`).
+`check_ldscnr()` checks the installed package's GitHub revision before a data
+set runs, and an older or non-GitHub installation stops the batch. If that
+happens, reinstall the revision from [Installation](#installation). A version
+number alone is not enough, because package code can change without a
+version bump.
 
 Developers who need an uninstalled local checkout can set
-`LDSCNR_DEV_LOAD_ALL=1` before `Rscript run_batch.R`; this uses
-`devtools::load_all()` and checks the local source hash instead. Ordinary
-users need neither a checkout of `LDscnR` nor `devtools`.
-
-## Examples
+`LDSCNR_DEV_LOAD_ALL=1`, and `LDSCNR_REPO` to the checkout's path, before
+`Rscript run_batch.R`. This uses `devtools::load_all()` and checks the local
+source hash instead. Ordinary users need neither an LDscnR checkout nor
+`devtools`.
 
 ## Reproducing the manuscript
 
-`manuscript/` runs this pipeline on the two full-genome stickleback panels of
-the LDscnR manuscript and compares every result with the manuscript modules
-(LDscnR-paper `module_3sp`, `module_9sp`). The defaults match the modules'
-settings (Stage-1 decay `slide = 500`, `rho = 0.5`, seed 1, GCTA GRM on the
-Stage-1 representatives, the marker-density `size_floor`, 1,000/200
-permutations, 10,000 EcoPeak relocations); the 9sp panel adds
-`input/covariate.rds` (lineage), and both panels permute populations within
-groups with `perm_within_groups()`, which consumes random numbers in the same
-order as the modules. Needs a local LDscnR-paper checkout with the module
-bundles (`LDSCNR_PAPER`, default `~/gitlab/LDscnR-paper`):
+`manuscript/` runs this workflow on the two full stickleback panels of the
+manuscript and compares every result with the manuscript's analysis modules
+(`module_3sp` and `module_9sp` in the LDscnR-paper repository). The defaults
+match the modules' settings:
+
+| Setting | Value |
+| --- | --- |
+| Stage-1 LD threshold | rho = 0.50 |
+| LD-decay window (`slide`) | 500 markers |
+| GRM | GCTA (Yang et al. 2011), from the representative marker of every Stage-1 unit |
+| Floor | marker-density rule (8 for three-spined, 12 for nine-spined) |
+| Permutations | 1,000 (consensus) and 200 (Simes) |
+| EcoPeak relocation test | 10,000 relocations within chromosomes |
+| Random seed | 1 |
+
+The nine-spined panel adds `input/covariate.rds` (lineage). Both panels
+permute populations within groups with `perm_within_groups()`, which draws
+random numbers in the same order as the modules.
+
+The scripts need the modules' Stage-1 bundles and data from a local
+LDscnR-paper checkout (environment variable `LDSCNR_PAPER`). Without them,
+`manuscript/` documents the reproduction but cannot rerun it.
 
 ```bash
-Rscript manuscript/build_inputs.R   # dataset folders from the module bundles
-Rscript manuscript/run.R            # Stage 1, Stage A, Stage B; ~1 h for both panels
-Rscript manuscript/compare.R        # writes manuscript/comparison.{csv,md}
+Rscript manuscript/build_inputs.R    # data set folders from the module bundles
+Rscript manuscript/run.R             # all steps, including the floor profile
+Rscript manuscript/compare.R --out=manuscript/comparison_vs_v091
 ```
 
-Result (2026-10-26, LDscnR v0.9.1): `manuscript/comparison_vs_v091.md` -- all 68 checks
-identical to the module scans re-run under v0.9.1 (Stage-1 clusters, GRM, every unit p-value,
-region spans, permutation surrogates, EcoPeak relocations). `manuscript/comparison_vs_stored.md`
-compares with the modules' earlier stored outputs (pre-v0.9.1 LDscnR commits): identical except
-the EcoPeak relocation null mean, fold and p, which changed because v0.9.1 fixed region placement
-in `ld_region_rotation()` (relocations now stay inside the chromosome).
+`manuscript/run.R` calls the workflow's steps directly, without the Manhattan
+plots and the structure-alignment check. For a new data set, use
+`run_dataset()` or `run_batch.R` instead.
 
-`examples/3sp_chr1_chr4` and `examples/9sp_chr19_chr20` (see
-`examples/build_examples.R`) are real two-chromosome subsets of the
-`LDscnR-paper` `module_3sp`/`module_9sp` datasets -- small enough to run the
-whole pipeline in a few minutes, real enough to reproduce known biology (the
-3sp Chr1 region lands almost exactly on the marine/freshwater inversion
-`module_3sp/R_figures/figure_manhattan.R` annotates by hand at
-Chr1:21.49-21.94 Mb). `3sp_chr1_chr4` also carries an
-`external_pvalues/lfmm.rds`, demonstrating Stage B on a non-EMMAX engine.
-9sp has no external engine and a plain-character (not factor) `Chr` column,
-which is what surfaced the `SNPRelate::snpgdsGRM()` `autosome.only` fix in
-`R/03_stage_A_emmax.R` -- kept as the second example specifically because it
-does not look like the first one.
+| Manuscript result | Produced by | Compared in |
+| --- | --- | --- |
+| Stage-1 units, GRM, LD decay | `build_stage1()` | `comparison_vs_v091.md`, "Stage 1" rows |
+| Units tested, significant units and outlier regions (consensus, Simes, LFMM) | `run_stage_A()`, `run_stage_B()` | rows per test |
+| Permutation tests (null mean and p) | `run_stage_B()` | "permutation" rows |
+| EcoPeak relocation tests | `run_stage_B()` with the EcoPeak annotation | "EcoPeaks" rows |
+| Floor-stability tiers and EcoPeaks per tier | `run_floor_profile()`, `manuscript/run.R` | "floor tier" rows |
+
+Result (LDscnR v0.9.1): all 108 checks in
+`manuscript/comparison_vs_v091.md` match the modules' results. They cover the
+Stage-1 units, the GRM, the LD-decay fit, every unit p-value, the significant
+units, the outlier-region spans, the permutation counts, the EcoPeak
+relocation tests, the floor-stability tiers and the EcoPeak tests per tier.
+`manuscript/comparison_vs_stored.md` compares with the modules' earlier
+outputs from LDscnR commits before v0.9.1. It matches except for the EcoPeak
+relocation null mean, fold and p of the three three-spined tests (9 of 108
+checks), which changed because v0.9.1 keeps relocated regions inside their
+chromosome.
+
+The LFMM2 p-values are not computed here. `manuscript/build_inputs.R` converts
+the manuscript's stored LFMM2 F statistics (`LEA::lfmm2.test()`, K = 7) to
+p-values with `pf(F, 1, n - 2)`, exactly as the modules do. These F
+statistics are not divided by the genomic inflation factor.
 
 ## Scope
 
-LDscnR-only: Stage 2 is engine-agnostic on *p-values*, not on detection
-method -- there is no plugin interface here for non-LDscnR outlier callers
-(OutFLANK, BayeScan, pcadapt, ...) that a wider comparative project might
-also use; those are a separate concern from this repo's job of batch-running
-LDscnR itself.
+LDscnR-multi accepts p-values from any method, but it runs only LDscnR's own
+outlier analysis. It has no interface for other outlier methods (OutFLANK,
+BayeScan or pcadapt, for example).
 
 ## Known limitations
 
-Two limitations matter when planning larger analyses:
+- **Plotting at genome scale.** `ldm_manhattan()` plots every marker. This
+  works for the full panels used here, but a much larger panel would benefit
+  from thinning or rasterising the points.
+- **One data set folder per genotype panel and phenotype.** Screening many
+  phenotypes on the same genotype panel needs one folder per phenotype. Each
+  folder then rebuilds the same Stage 1 and stores its own copy of
+  `genotypes.rds` and `map.rds`. Sharing Stage 1 between phenotypes would need
+  a change of design.
 
-- **Plotting at genome scale.** `ldm_manhattan()` plots every marker by
-  default; fine on this repo's small worked examples, worth a point-
-  thinning/rasterisation pass before running this at genome scale. (The
-  memory-conscious `p_perm` representation this bullet used to ask for is
-  done -- see "The simes arm's compact permutation scan" above -- but the
-  plotting side of the concern is still open.)
-- **One dataset folder per (genotype panel, phenotype) pair.** Screening
-  many phenotypes against the SAME genotype panel currently means one
-  folder per phenotype, each independently rebuilding Stage 1 (genotype-
-  only, and so identical across them) and duplicating `genotypes.rds`/
-  `map.rds` on disk. Fine when "dataset" means a genuinely different
-  genomic panel (this repo's own two examples); a real cost when it means
-  many phenotypes on one panel. Splitting genotype-panel-level shared state
-  from phenotype-level per-test state is a real architecture change, not a
-  bolt-on fix -- worth its own design pass before hundreds of phenotypes on
-  one panel is the actual use case.
+## How to cite
+
+If you use LDscnR-multi, please cite the manuscript and the LDscnR package:
+
+- Kemppainen P, Guillaume F (2026). LDscnR: LD-aware complexity reduction
+  for genome scans. *bioRxiv*.
+  <https://doi.org/10.64898/2026.10.27.762116>. Submitted to *Molecular
+  Ecology Resources*.
+- Kemppainen P. LDscnR, version 0.9.1. R package.
+  <https://github.com/genomeinsights/LDscnR>
+
+`CITATION.cff` holds the same information in machine-readable form.
+
+The example data and the manuscript reproduction use:
+
+- Fang B, Kemppainen P, Momigliano P, Merilä J (2021). Population structure
+  limits parallel evolution in sticklebacks. *Molecular Biology and
+  Evolution* 38: 4205-4221. <https://doi.org/10.1093/molbev/msab144>.
+  Genotype data: <https://doi.org/10.5281/zenodo.4722879> (CC BY 4.0). The
+  example genotypes are two-chromosome subsets of these data.
+- Kingman GAR et al. (2021). Predicting future from past: the genomic basis
+  of recurrent and rapid stickleback evolution. *Science Advances* 7:
+  eabg5285. <https://doi.org/10.1126/sciadv.abg5285>. EcoPeaks: FigShare
+  project 162634 (<https://figshare.com/projects/kingsleyAssemblyHub/162634>).
+  Used only by the manuscript reproduction and not distributed here.
+
+Methods referred to above:
+
+- Kang HM et al. (2010). Variance component model to account for sample
+  structure in genome-wide association studies. *Nature Genetics* 42:
+  348-354.
+- Caye K, Jumentier B, Lepeule J, François O (2019). LFMM 2: fast and accurate
+  inference of gene-environment associations in genome-wide studies.
+  *Molecular Biology and Evolution* 36: 852-860.
+- Yang J, Lee SH, Goddard ME, Visscher PM (2011). GCTA: a tool for
+  genome-wide complex trait analysis. *American Journal of Human Genetics*
+  88: 76-82.
+
+## Licence
+
+MIT (see [`LICENSE`](LICENSE)), the same licence as LDscnR.
