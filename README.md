@@ -14,10 +14,10 @@ LDscnR-multi version 0.9.1 matches LDscnR v0.9.1, the version used in the
 manuscript (see [How to cite](#how-to-cite)).
 
 On one core of an Apple M3 Pro laptop (36 GB memory, R 4.6.1), a complete run
-of `run_dataset()` took about 19 minutes for the full three-spined stickleback
-panel (790,578 markers) and about 36 minutes for the full nine-spined
-stickleback panel (1,195,557 markers), including the Manhattan plots. The
-manual breaks these times down by step. These are measured examples, not
+of `run_dataset()` took about 14 minutes for the full three-spined stickleback
+panel (790,578 markers) and about 28 minutes for the full nine-spined
+stickleback panel (1,195,557 markers), with peak memory use of 11 and 17 GB.
+The manual breaks these times down by step. These are measured examples, not
 promised run times. The association scans are fast because `emmax_fast()`
 reuses the fitted relationship model, whereas the Stage-1 LD calculations and
 the floor profile take most of the time.

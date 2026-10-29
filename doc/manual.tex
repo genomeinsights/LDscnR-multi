@@ -66,8 +66,9 @@ analyse one data set or a collection of data set folders. Each data set keeps
 its own inputs and results, and a batch run also writes a combined summary.
 
 On one core of an Apple M3 Pro laptop (36~GB memory, R~4.6.1), a complete
-run took about 19 minutes for the three-spined panel (790{,}578 markers) and
-about 36 minutes for the nine-spined panel (1{,}195{,}557 markers), including the Manhattan plots.
+run took about 14 minutes for the three-spined panel (790{,}578 markers) and
+about 28 minutes for the nine-spined panel (1{,}195{,}557 markers), with peak
+memory use of 11 and 17~GB.
 Section~\ref{sec:running} breaks these times down by step. They are measured
 examples, not promised run times, because marker density, memory, processor
 speed, the number of permutations and the plots all matter. The association
@@ -501,7 +502,11 @@ applicable step, in order, for one data set. Start with the two-chromosome
 examples in \code{examples/}, which take a few minutes. A full panel takes
 minutes per step rather than seconds. Table~\ref{tab:timing} shows the times
 of a complete run of each full panel from scratch, on one core of an Apple
-M3 Pro laptop with 36~GB of memory and R~4.6.1. A second call on an
+M3 Pro laptop with 36~GB of memory and R~4.6.1. Peak memory use was 11~GB
+for the three-spined panel and 17~GB for the nine-spined panel. Four cores
+(\code{cores = 4}) shortened the three-spined run by only 13\%, to
+12.5 minutes. Fitting LFMM2 to the three-spined markers, which is done
+outside this workflow, took about 4.1 hours on one core. A second call on an
 unchanged data set is fast (Section~\ref{sec:receipts}).
 
 \noindent\begin{minipage}{\linewidth}
@@ -512,11 +517,10 @@ unchanged data set is fast (Section~\ref{sec:receipts}).
 \toprule
 \textbf{Step} & \textbf{Three-spined} & \textbf{Nine-spined} \\
 \midrule
-Stage 1 & 8.3 & 14.8 \\
-LD-decay report and structure-alignment check & 0.4 & 0.7 \\
-Floor profile, including the association scan and unit testing at the reported floor & 5.4 & 14.3 \\
-Unit testing of the external engine (LFMM2, three-spined only) and the Manhattan plots & 4.6 & 6.6 \\
-\textbf{Total} & 18.6 & 36.4 \\
+Stage 1, including the LD-decay fit & 8.0 & 13.5 \\
+Floor profile, including the EMMAX permutation nulls & 5.3 & 12.7 \\
+Remaining steps, including the Simes test on LFMM2 p-values (three-spined only) and the relocation tests & about 1 & about 2 \\
+\textbf{Total} & 14 & 28 \\
 \bottomrule
 \end{tabular}
 \end{minipage}\par\medskip
