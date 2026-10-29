@@ -50,9 +50,11 @@ below lists the other names that differ between the code and the manuscript.
 | In the code and output files | In the manuscript and this README |
 | --- | --- |
 | `run_stage_A()` | association scan |
-| `run_stage_B()`, `stageB_<engine>/` | unit testing and Stage-2 assembly |
-| statistic `unit`, engine `emmax_unit` | consensus test |
-| statistic `simes`, engine `emmax_simes` | Simes test |
+| `run_stage_B()`, `stageB_<method>/` | unit testing and Stage-2 assembly |
+| statistic `unit`, method `emmax_unit` | consensus test |
+| statistic `simes`, method `emmax_simes` | Simes test |
+| `_receipt.rds` | run record |
+| engine (`engine`, `engines`, `"no_engine"`) | outlier method, the source of the p-values that unit testing uses |
 | `ld_region_rotation()`, `n_rotations`, `region_rotation.rds` | relocation test, number of relocations |
 | `canonical_regions_*.csv`, "canonical floor" | outlier regions at the reported floor |
 | cluster, `unit_id`, `core_snp` | Stage-1 unit, its index and its representative marker |
@@ -118,7 +120,7 @@ for (f in sort(list.files("R", pattern = "\\.R$", full.names = TRUE))) source(f)
 
 run_dataset("examples/3sp_chr1_chr4")
 result <- run_all(c("examples/3sp_chr1_chr4", "examples/9sp_chr19_chr20"))
-result$summary            # one row per data set and engine
+result$summary            # one row per data set and outlier method
 result$alignment_summary  # one row per data set with input/population.rds
 ```
 
@@ -166,9 +168,12 @@ manuscript modules' bundles. Only maintainers need it (see its header).
 ```
 <dataset_dir>/
   input/
-    genotypes.rds        required. Numeric dosage matrix (0, 1, 2; NA allowed),
+    genotypes.rds        required. Numeric dosage matrix (0 to 2, NA allowed),
                          individuals in rows (row names = individual IDs) and
                          markers in columns (column names = marker IDs).
+                         Expected genotypes from genotype likelihoods are
+                         accepted. Stage 1 and the GRM round them to 0, 1 or 2,
+                         and the association scan uses them as given.
     map.rds              required. data.table or data.frame with columns marker,
                          Chr and Pos. map$marker must equal colnames(genotypes),
                          in the same order.
@@ -191,10 +196,10 @@ manuscript modules' bundles. Only maintainers need it (see its header).
     config.R             optional. Plain R that assigns any DEFAULTS name from
                          R/00_config.R (for example cr_rho <- 0.35) to
                          override it for this data set only.
-  external_pvalues/      optional. One .rds per extra p-value engine, each a
+  external_pvalues/      optional. One .rds per additional outlier method, each a
                          named numeric vector (names = map$marker). The file
-                         name without .rds is the engine name, so
-                         external_pvalues/lfmm.rds is engine "lfmm".
+                         name without .rds is the method name, so
+                         external_pvalues/lfmm.rds is method "lfmm".
   cache/                 written by the workflow and regenerable (see below).
   output/                written by the workflow and regenerable (see below).
 ```
@@ -214,7 +219,12 @@ the GRM. They are rebuilt automatically when the inputs or the relevant
 settings change. Pairwise LD edge lists are not stored, because at
 full-genome density one chromosome's edge list can take several gigabytes.
 Every step that needs them rebuilds them from the GDS file, one chromosome at
-a time. The `slide` setting in `R/00_config.R` sets their size.
+a time. The `slide` setting in `R/00_config.R` sets their size, in
+markers. Larger windows need more memory and time. To choose it, first run
+Stage 1 with a small window, such as 100 markers. The LD-decay report then
+gives, in `slide_snp_rho_0.99`, the window in markers that retains 99% of LD
+on each chromosome. If that is larger than the current window, rerun Stage 1
+with a window at least that large.
 
 **`output/`** holds:
 
@@ -224,7 +234,7 @@ a time. The `slide` setting in `R/00_config.R` sets their size.
 | `alignment/` | `observed.csv`, `null_draws.csv`, `null_summary.csv` (see [Structure-alignment check](#structure-alignment-check)) |
 | `pvalues/emmax_unit/` | `p_obs.rds` and `p_perm.rds` for the consensus test, plus `p_obs_marker.rds`, a marker-wise EMMAX scan used only for plotting |
 | `pvalues/emmax_simes/` | `p_obs.rds` for every marker, and `p_perm_compact.rds`, the permutations for markers in tested Stage-1 units only |
-| `stageB_<engine>/` | `outlier_test.rds`, `outlier_perm.rds` (with a permutation null), `region_rotation.rds` (with an annotation), `snp_results.csv`, `region_table.csv` and `report.txt` |
+| `stageB_<method>/` | `outlier_test.rds`, `outlier_perm.rds` (with a permutation null), `region_rotation.rds` (with an annotation), `snp_results.csv`, `region_table.csv` and `report.txt` |
 | `floor_profile/` | `grid.csv`, `summary.csv`, `canonical_regions_unit.csv`, `canonical_regions_simes.csv` (see [Floor profile](#floor-profile)) |
 | `figures/` | `manhattan.{png,pdf}` (q-values) and `manhattan_ld_w.{png,pdf}` (local LD support) |
 | `floor_sweep_summary.csv`, `figures/manhattan_floor_sweep.{png,pdf}` | only after `run_floor_sweep()` |
@@ -241,14 +251,14 @@ One row per marker in `map`:
 | `marker` | Marker ID, from `map$marker`. |
 | `Chr`, `Pos` | Chromosome and position, from `map`. |
 | `statistic` | `"unit"` (consensus) or `"simes"`, the test that produced this row. |
-| `marker_p`, `marker_q` | The marker's own p-value and Benjamini-Hochberg (BH) q-value. Defined only for marker-wise p-values (the Simes test or an external engine). `NA` for the consensus test, which has no marker-wise p-value. |
+| `marker_p`, `marker_q` | The marker's own p-value and Benjamini-Hochberg (BH) q-value. Defined only for marker-wise p-values (the Simes test or an external method). `NA` for the consensus test, which has no marker-wise p-value. |
 | `unit_p`, `unit_q` | The p-value and q-value of the marker's Stage-1 unit, copied to every member marker. Significance is decided from these for both tests. |
 | `p_display`, `q_display` | The values that `ldm_manhattan()` plots. They equal `marker_p` and `marker_q` when those exist. For the consensus test they come from the separate marker-wise EMMAX scan (`p_obs_marker.rds`), so the plot shows variation between markers instead of one flat value per unit. |
 | `unit_id` | The marker's tested Stage-1 unit, or `NA` if its unit is smaller than the floor and was not tested. |
 | `region_id` | The marker's outlier region, as `"<Chr>:<from>-<to>"`, or `NA` if its unit was not significant. |
 | `significant` | Whether the marker's unit is significant at `alpha` after BH correction. `NA` when `tested` is `FALSE`. |
 | `tested` | Whether the marker's unit reached the floor and was tested (`!is.na(unit_id)`). |
-| `ld_w_095` | Local LD support at rho = 0.95 (see [LD-decay report](#ld-decay-report)). It depends only on the genotypes, so it is the same in every engine's file. |
+| `ld_w_095` | Local LD support at rho = 0.95 (see [LD-decay report](#ld-decay-report)). It depends only on the genotypes, so it is the same in every method's file. |
 
 Markers are assigned to `unit_id` and `region_id` by Stage-1 and Stage-2
 membership, not by coordinates. Stage-1 units and outlier regions are not
@@ -257,7 +267,7 @@ belong to another unit or region.
 
 ### `region_table.csv`
 
-One row per outlier region for this engine, as returned by LDscnR's
+One row per outlier region for this outlier method, as returned by LDscnR's
 `ld_outlier_test()`:
 
 | Column | Meaning |
@@ -319,7 +329,8 @@ inversion or suppressed recombination, stands out on its page.
 how much of the phenotype is explained by (a) `structure_group.rds`, the
 sampling groups within which the permutation null shuffles, and (b) the
 leading axes of the GRM computed between populations. It follows the
-manuscript's alignment analysis. It is a warning, not a gate. As the
+manuscript's alignment analysis. It is a warning only, and it does not stop
+the analysis or remove any results. As the
 manuscript puts it, the check shows when phenotype and ancestry offer nearly
 interchangeable explanations, but it does not invalidate a result.
 `run_dataset()` runs it when both `input/population.rds` and
@@ -430,7 +441,7 @@ and combine the returned `summary` tables with `rbindlist()`.
 
 `ldm_manhattan()` adds the tier to the labels of the consensus and Simes
 panels whenever `output/floor_profile/canonical_regions_<statistic>.csv`
-exists, for example `"R5 (3/3)"` instead of `"R5"`. External engines, such as
+exists, for example `"R5 (3/3)"` instead of `"R5"`. External methods, such as
 LFMM, have no floor profile and keep plain labels.
 
 ## Simes permutations at full-genome scale
@@ -464,23 +475,27 @@ separately when you want this more thorough check.
 `floor_sweep_summary.csv` has one row per floor and test, with the columns
 `floor`, `statistic`, `n_units_tested`, `n_significant` and `n_regions`.
 
-## Receipts: every step is skipped when nothing changed
+## Run records: unchanged steps are not recomputed
 
-Every step (`build_stage1()`, `run_stage_A()`, each `run_stage_B()` engine
-and `check_structure_alignment()`) saves a hash of its inputs and settings in
-`_receipt.rds` next to its output. It skips the work when nothing has
-changed. The floor profile and the floor sweep are made of these steps, so
-they use the same receipts. The hashes are of file contents, not timestamps, so
-a `git checkout` or a copied file cannot make a step look unchanged. Running
-`run_dataset()` or `run_all()` again on unchanged data sets only reads the
-receipts. Pass `force = TRUE` to rebuild anyway.
+Several steps take minutes to hours, so the workflow does not repeat a step
+whose inputs and settings have not changed. Each step (`build_stage1()`,
+`run_stage_A()`, each `run_stage_B()` outlier method and
+`check_structure_alignment()`) writes a run record, `_receipt.rds`, next to
+its output. It lists the step's input files, settings and output files with
+a hash of each. A hash is a short fingerprint computed from a file's
+contents, so any change in the contents gives a different hash. When the
+step is called again and all hashes match, it reuses the saved results. The
+floor profile and the floor sweep are made of these steps, so they use the
+same run records. Because the hashes are of contents, not timestamps, a
+`git checkout` or a copied file cannot make a step look unchanged. Pass
+`force = TRUE` to rebuild anyway.
 
-A receipt is also out of date when:
+A run record is also out of date when:
 
 - one of its recorded output files is missing;
 - the LDscnR revision has changed since it was written (see
   [LDscnR version](#ldscnr-version));
-- for the association scan, the Stage-1 receipt has changed;
+- for the association scan, the Stage-1 run record has changed;
 - for unit testing, p-values or annotations passed directly to
   `run_stage_B()` differ in content from those recorded.
 
@@ -490,14 +505,14 @@ A receipt is also out of date when:
 set is recorded with `status = "error"` and the others still run (see
 `stop_on_error`). It writes two summary files.
 
-`summary.csv` has one row per data set and engine:
+`summary.csv` has one row per data set and outlier method:
 
 | Column | Meaning |
 | --- | --- |
 | `dataset` | `basename(dataset_dir)`. |
-| `engine` | The p-value engine (`emmax_unit`, `emmax_simes` or an external engine). `NA` if the data set had no engine or failed before reaching one. |
+| `engine` | The outlier method (`emmax_unit`, `emmax_simes` or an external method). `NA` if the data set had no method or failed before reaching one. |
 | `n_markers` | The number of markers in the data set's `map`. |
-| `n_units_tested`, `n_significant`, `n_regions` | Units tested, significant units and outlier regions for this engine at the reported floor. |
+| `n_units_tested`, `n_significant`, `n_regions` | Units tested, significant units and outlier regions for this method at the reported floor. |
 | `runtime_s` | Wall-clock seconds for the whole `run_dataset()` call. It is the same on every row of a data set. |
 | `status` | `"ok"`, `"no_engine"` (the data set ran but had no p-values to test) or `"error"`. |
 | `error` | The error message when `status = "error"`, and `NA` otherwise. |
