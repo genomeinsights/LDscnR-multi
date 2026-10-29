@@ -6,12 +6,20 @@
 ##   module_3sp/out/02_bundle/bundle.rds   Stage 1, LD decay, GRM
 ##   module_3sp/out/03_EMMAX/scan.rds      consensus + Simes: test, null, EcoPeak relocation
 ##   module_3sp/out/04_lfmm/lfmm.rds       LFMM Simes: test, EcoPeak relocation
-##   module_9sp/out/02_bundle/bundle.rds, module_9sp/out/03_EMMAX/scan.rds
+##   module_3sp/out/14_floor_tiers/       floor-stability tiers (+ EcoPeaks per tier)
+##   module_9sp/out/02_bundle/bundle.rds, module_9sp/out/03_EMMAX/scan.rds,
+##   module_9sp/out/04_floor_tiers/
 ## Optionally also with a reference re-run of the module scans under the
 ## installed LDscnR (--reference-dir=DIR holding ref_3sp.rds / ref_9sp.rds),
 ## which separates LDscnR-version effects from pipeline differences.
 ##
-## Writes manuscript/comparison.{csv,md} (or --out=STEM).
+## Writes manuscript/comparison.{csv,md} (or --out=STEM). The committed files
+## were written with
+##   Rscript manuscript/compare.R --out=manuscript/comparison_vs_v091
+##     (the modules' current outputs, re-run under LDscnR v0.9.1)
+##   Rscript manuscript/compare.R --out=manuscript/comparison_vs_stored \
+##     --stored-3sp=<LDscnR-paper>/module_3sp/out_pre_v0.9.1
+##     (the modules' earlier outputs, from pre-v0.9.1 LDscnR commits)
 ## Run from the repository root:  Rscript manuscript/compare.R [--reference-dir=DIR]
 ## =============================================================================
 suppressMessages(library(data.table))
@@ -77,8 +85,35 @@ stage_b <- function(d, eng) {
   list(test = rd("outlier_test.rds"), perm = rd("outlier_perm.rds"), rotation = rd("region_rotation.rds"))
 }
 
-for (pp in list(list(panel = "3sp", module = "module_3sp", lfmm = TRUE),
-                list(panel = "9sp", module = "module_9sp", lfmm = FALSE))) {
+## Floor-stability tiers: the module's regions_by_tier.tsv against
+## output/floor_profile/canonical_regions_{unit,simes}.csv
+tier_rows <- function(panel, tier_dir, d) {
+  if (!file.exists(file.path(tier_dir, "regions_by_tier.tsv"))) return(invisible())
+  mt <- fread(file.path(tier_dir, "regions_by_tier.tsv"))
+  fp <- file.path("manuscript", "data", d, "output", "floor_profile")
+  for (st in c("unit", "simes")) {
+    arm <- if (st == "unit") "EMMAX consensus" else "EMMAX Simes"
+    lt <- fread(file.path(fp, sprintf("canonical_regions_%s.csv", st)))
+    m <- mt[statistic == st]
+    for (k in 3:1) add(panel, arm, sprintf("floor tier %d/3: regions", k), sum(m$tier == k), sum(lt$n_ticks == k))
+    key_m <- sort(m[, paste(Chr, from, to, tier)]); key_l <- sort(lt[, paste(Chr, from, to, n_ticks)])
+    add(panel, arm, "floor tiers: same tier for every region", "-", identical(key_m, key_l))
+  }
+  ef <- file.path(tier_dir, "ecopeak_by_tier.tsv")
+  if (file.exists(ef)) {
+    me <- fread(ef); le <- fread(file.path(fp, "ecopeak_by_tier.csv"))
+    for (st in c("unit", "simes")) for (s in c(">=2/3", "3/3", "2/3 only", "1/3 only")) {
+      arm <- if (st == "unit") "EMMAX consensus" else "EMMAX Simes"
+      a <- me[statistic == st & set == s]; b <- le[statistic == st & set == s]
+      add(panel, arm, sprintf("EcoPeaks, tier %s: regions overlapping", s), a$ecopeak, b$ecopeak)
+      add(panel, arm, sprintf("EcoPeaks, tier %s: fold", s), a$fold, b$fold)
+      add(panel, arm, sprintf("EcoPeaks, tier %s: p", s), a$p, b$p)
+    }
+  }
+}
+
+for (pp in list(list(panel = "3sp", module = "module_3sp", lfmm = TRUE, tiers = "14_floor_tiers"),
+                list(panel = "9sp", module = "module_9sp", lfmm = FALSE, tiers = "04_floor_tiers"))) {
   d <- paste0(pp$panel, "_full")
   cat("[", pp$panel, "]\n")
   ref <- if (length(REF_DIR)) { f <- file.path(REF_DIR, sprintf("ref_%s.rds", pp$panel)); if (file.exists(f)) readRDS(f) }
@@ -106,13 +141,14 @@ for (pp in list(list(panel = "3sp", module = "module_3sp", lfmm = TRUE),
     lf <- readRDS(file.path(sd, "04_lfmm", "lfmm.rds"))
     arm_rows(pp$panel, "LFMM Simes", lf, stage_b(d, "lfmm"), ref$lfmm)
   }
+  tier_rows(pp$panel, file.path(sd, pp$tiers), d)
 }
 out <- rbindlist(rows)
 out[, match := fifelse(module == "-", multi %in% c("TRUE"), module == multi)]
 out[grepl("max \\|", metric), match := !is.na(as.numeric(multi)) & as.numeric(multi) == 0]
 fwrite(out, paste0(OUT_STEM, ".csv"))
 
-md <- c("| panel | arm | metric | module (stored) | LDscnR-multi | module re-run, installed LDscnR | match |",
+md <- c("| panel | arm | metric | manuscript module | LDscnR-multi | reference re-run (--reference-dir) | match |",
         "|---|---|---|---|---|---|---|",
         out[, sprintf("| %s | %s | %s | %s | %s | %s | %s |", panel, arm, metric, module, multi,
                       fifelse(is.na(reference), "", reference), fifelse(match, "yes", "**no**"))])

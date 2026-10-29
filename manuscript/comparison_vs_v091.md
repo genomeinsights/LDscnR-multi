@@ -1,4 +1,4 @@
-| panel | arm | metric | module (stored) | LDscnR-multi | module re-run, installed LDscnR | match |
+| panel | arm | metric | manuscript module | LDscnR-multi | reference re-run (--reference-dir) | match |
 |---|---|---|---|---|---|---|
 | 3sp | Stage 1 | LD decay: max |difference| (decay_sum) | - | 0 |  | yes |
 | 3sp | Stage 1 | clusters | 614897 | 614897 |  | yes |
@@ -43,6 +43,38 @@
 | 3sp | LFMM Simes | EcoPeaks: relocation null mean | 6.5672 | 6.5672 |  | yes |
 | 3sp | LFMM Simes | EcoPeaks: fold | 1.52272 | 1.52272 |  | yes |
 | 3sp | LFMM Simes | EcoPeaks: p | 0.0968903 | 0.0968903 |  | yes |
+| 3sp | EMMAX consensus | floor tier 3/3: regions | 4 | 4 |  | yes |
+| 3sp | EMMAX consensus | floor tier 2/3: regions | 10 | 10 |  | yes |
+| 3sp | EMMAX consensus | floor tier 1/3: regions | 25 | 25 |  | yes |
+| 3sp | EMMAX consensus | floor tiers: same tier for every region | - | TRUE |  | yes |
+| 3sp | EMMAX Simes | floor tier 3/3: regions | 5 | 5 |  | yes |
+| 3sp | EMMAX Simes | floor tier 2/3: regions | 7 | 7 |  | yes |
+| 3sp | EMMAX Simes | floor tier 1/3: regions | 23 | 23 |  | yes |
+| 3sp | EMMAX Simes | floor tiers: same tier for every region | - | TRUE |  | yes |
+| 3sp | EMMAX consensus | EcoPeaks, tier >=2/3: regions overlapping | 8 | 8 |  | yes |
+| 3sp | EMMAX consensus | EcoPeaks, tier >=2/3: fold | 3.80662 | 3.80662 |  | yes |
+| 3sp | EMMAX consensus | EcoPeaks, tier >=2/3: p | 0.00009999 | 0.00009999 |  | yes |
+| 3sp | EMMAX consensus | EcoPeaks, tier 3/3: regions overlapping | 3 | 3 |  | yes |
+| 3sp | EMMAX consensus | EcoPeaks, tier 3/3: fold | 3.55577 | 3.55577 |  | yes |
+| 3sp | EMMAX consensus | EcoPeaks, tier 3/3: p | 0.0236976 | 0.0236976 |  | yes |
+| 3sp | EMMAX consensus | EcoPeaks, tier 2/3 only: regions overlapping | 5 | 5 |  | yes |
+| 3sp | EMMAX consensus | EcoPeaks, tier 2/3 only: fold | 3.95977 | 3.95977 |  | yes |
+| 3sp | EMMAX consensus | EcoPeaks, tier 2/3 only: p | 0.00069993 | 0.00069993 |  | yes |
+| 3sp | EMMAX consensus | EcoPeaks, tier 1/3 only: regions overlapping | 5 | 5 |  | yes |
+| 3sp | EMMAX consensus | EcoPeaks, tier 1/3 only: fold | 2.10615 | 2.10615 |  | yes |
+| 3sp | EMMAX consensus | EcoPeaks, tier 1/3 only: p | 0.0666933 | 0.0666933 |  | yes |
+| 3sp | EMMAX Simes | EcoPeaks, tier >=2/3: regions overlapping | 7 | 7 |  | yes |
+| 3sp | EMMAX Simes | EcoPeaks, tier >=2/3: fold | 3.41447 | 3.41447 |  | yes |
+| 3sp | EMMAX Simes | EcoPeaks, tier >=2/3: p | 0.00089991 | 0.00089991 |  | yes |
+| 3sp | EMMAX Simes | EcoPeaks, tier 3/3: regions overlapping | 4 | 4 |  | yes |
+| 3sp | EMMAX Simes | EcoPeaks, tier 3/3: fold | 4.14036 | 4.14036 |  | yes |
+| 3sp | EMMAX Simes | EcoPeaks, tier 3/3: p | 0.00389961 | 0.00389961 |  | yes |
+| 3sp | EMMAX Simes | EcoPeaks, tier 2/3 only: regions overlapping | 3 | 3 |  | yes |
+| 3sp | EMMAX Simes | EcoPeaks, tier 2/3 only: fold | 2.76651 | 2.76651 |  | yes |
+| 3sp | EMMAX Simes | EcoPeaks, tier 2/3 only: p | 0.0573943 | 0.0573943 |  | yes |
+| 3sp | EMMAX Simes | EcoPeaks, tier 1/3 only: regions overlapping | 3 | 3 |  | yes |
+| 3sp | EMMAX Simes | EcoPeaks, tier 1/3 only: fold | 1.68086 | 1.68086 |  | yes |
+| 3sp | EMMAX Simes | EcoPeaks, tier 1/3 only: p | 0.258274 | 0.258274 |  | yes |
 | 9sp | Stage 1 | LD decay: max |difference| (decay_sum) | - | 0 |  | yes |
 | 9sp | Stage 1 | clusters | 753625 | 753625 |  | yes |
 | 9sp | Stage 1 | same cluster membership | - | TRUE |  | yes |
@@ -68,3 +100,11 @@
 | 9sp | EMMAX Simes | permutation: null mean | 42.23 | 42.23 |  | yes |
 | 9sp | EMMAX Simes | permutation: p | 0.512438 | 0.512438 |  | yes |
 | 9sp | EMMAX Simes | permutation: same surrogate counts | - | TRUE |  | yes |
+| 9sp | EMMAX consensus | floor tier 3/3: regions | 3 | 3 |  | yes |
+| 9sp | EMMAX consensus | floor tier 2/3: regions | 6 | 6 |  | yes |
+| 9sp | EMMAX consensus | floor tier 1/3: regions | 11 | 11 |  | yes |
+| 9sp | EMMAX consensus | floor tiers: same tier for every region | - | TRUE |  | yes |
+| 9sp | EMMAX Simes | floor tier 3/3: regions | 2 | 2 |  | yes |
+| 9sp | EMMAX Simes | floor tier 2/3: regions | 6 | 6 |  | yes |
+| 9sp | EMMAX Simes | floor tier 1/3: regions | 5 | 5 |  | yes |
+| 9sp | EMMAX Simes | floor tiers: same tier for every region | - | TRUE |  | yes |

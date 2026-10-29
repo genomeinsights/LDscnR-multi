@@ -29,16 +29,13 @@
 ## "simes" arm reuses the shared, floor-independent marker scan at every
 ## floor. Neither side floor gets a permutation null.
 ##
-## REGIONS ARE MATCHED ACROSS FLOORS BY STAGE-1 CLUSTER IDENTITY, NOT SPAN
-## OVERLAP: a unit's own `unit_id` is a position index into that floor's own
-## size_floor-filtered cluster subset (.ld_outlier_units(), LDscnR) and is
-## therefore NOT comparable across floors -- two different clusters can be
-## "unit_id 5" at two different floors. `core_snp` (each cluster's designated
-## representative marker, assigned once during clustering, independent of any
-## floor) IS stable, and is what "is this canonical region's cluster also
-## significant at the other floor" is actually asked about. Physical span
-## overlap is used only as a secondary sanity check on a recovered hit, per
-## the user's own instruction -- not as the primary matching key.
+## RECOVERY RULE: a reported region is recovered at a comparison floor when
+## at least one of its significant Stage-1 units is also significant there
+## AND the region overlaps an outlier region assembled at that floor (the
+## manuscript's rule, as in LDscnR-paper/module_3sp/R/helpers_floor_tiers.R).
+## Units are matched by `core_snp`, each unit's representative marker, which
+## does not depend on the floor. `unit_id` cannot be used, because it is a
+## position index into one floor's own size-filtered unit table.
 ## =============================================================================
 
 ## Achieved test-count reduction for one candidate integer floor.
@@ -60,85 +57,48 @@
                          marker_coverage = vapply(fl, function(f) sum(nl[nl >= f]) / n_markers, 0))
 }
 
-## Stable Stage-1 cluster identity for a set of unit_ids AT A GIVEN FLOOR --
-## see file header for why unit_id itself isn't comparable across floors.
-## unit_id VALUES (as carried by test$units and snp_results) are row indices
-## into the size-filtered cluster table: .ld_outlier_units() assigns unit_id =
-## cluster-table row, then sorts its rows by position. So index the filtered
-## cluster table by the unit_id value -- never by row position in
-## .ld_outlier_units() output (that is the order of p-value vectors and unit
-## matrices, used separately below).
-.unit_core_snp <- function(stage1, map, floor, unit_ids) {
-  cl <- data.table::as.data.table(stage1$clusters)
-  nl <- if ("n_loci" %in% names(cl)) cl$n_loci else cl$n_snps
-  cl[nl >= floor]$core_snp[unit_ids]
+## Significant units at one floor, with their floor-independent core_snp.
+## test$units follows .ld_outlier_units() row order (checked), so core_snp is
+## attached by position.
+.sig_units_with_core <- function(test, stage1, map, floor) {
+  uf <- LDscnR:::.ld_outlier_units(stage1, map, floor)
+  u <- data.table::copy(data.table::as.data.table(test$units))
+  stopifnot("outlier test units must follow .ld_outlier_units() order" = identical(u$unit_id, uf$unit_id))
+  u[, core_snp := uf$core_snp]
+  u[significant == TRUE]
 }
 
-## Canonical-region stability table for one statistic ("unit"/"simes").
-## `snp_results_by_floor` is a named list (names = floor, as character) of
-## that floor's own `run_stage_B()$snp_results`. Returns one row per
-## CANONICAL region (never per side-floor-only region -- this profile is
-## about how robust the PRIMARY, reported findings are, not a census of every
-## floor's own discoveries).
-.floor_stability_table <- function(snp_results_by_floor, canon_floor, side_floors, stage1, map) {
-  canon_sr <- snp_results_by_floor[[as.character(canon_floor)]]
-  if (is.null(canon_sr) || !any(!is.na(canon_sr$region_id))) return(data.table::data.table())
-
-  canon_units <- unique(canon_sr[!is.na(region_id), .(unit_id, region_id, Chr)])
-  canon_units[, core_snp := .unit_core_snp(stage1, map, canon_floor, unit_id)]
-  spans <- canon_sr[!is.na(region_id), .(from = min(Pos), to = max(Pos)), by = .(region_id, Chr)]
-
-  ## Per side floor: significant units' stable cluster identity, joined to
-  ## THAT FLOOR'S OWN region span (for the physical-overlap check) -- a
-  ## cluster's own significance and its Stage-2 grouping are BOTH floor
-  ## specific, even though the cluster's identity (core_snp) is not.
-  side_lookup <- stats::setNames(lapply(side_floors, function(fl) {
-    sr <- snp_results_by_floor[[as.character(fl)]]
-    if (is.null(sr)) return(NULL)
-    sig <- unique(sr[!is.na(unit_id) & significant == TRUE, .(unit_id, region_id)])
-    if (!nrow(sig)) return(NULL)
-    sig[, core_snp := .unit_core_snp(stage1, map, fl, unit_id)]
-    reg_spans <- sr[!is.na(region_id), .(from = min(Pos), to = max(Pos)), by = region_id]
-    sig[reg_spans, on = "region_id", `:=`(side_from = i.from, side_to = i.to)]
-    sig
+## Reported-region stability table for one statistic ("unit" or "simes").
+## `test_by_floor` is a named list (names = floor, as character) of that
+## floor's own run_stage_B()$test. Returns one row per region at the REPORTED
+## floor. A region is recovered at a comparison floor when at least one of
+## the significant Stage-1 units inside its span is also significant there
+## (matched by core_snp) AND the region overlaps an outlier region assembled
+## at that floor. This is the manuscript's rule and the one used by its
+## modules (LDscnR-paper/module_3sp/R/helpers_floor_tiers.R) and simulations.
+.floor_stability_table <- function(test_by_floor, canon_floor, side_floors, stage1, map) {
+  canon <- test_by_floor[[as.character(canon_floor)]]
+  if (is.null(canon) || !nrow(canon$regions)) return(data.table::data.table())
+  reg <- data.table::copy(data.table::as.data.table(canon$regions))
+  canon_sig <- .sig_units_with_core(canon, stage1, map, canon_floor)
+  side <- stats::setNames(lapply(side_floors, function(fl) {
+    t <- test_by_floor[[as.character(fl)]]
+    if (is.null(t)) return(NULL)
+    list(sig = .sig_units_with_core(t, stage1, map, fl), regions = data.table::as.data.table(t$regions))
   }), as.character(side_floors))
 
-  tick_col  <- function(fl) sprintf("tick_%03d", round(fl))
-  check_col <- function(fl) sprintf("overlap_check_%03d", round(fl))
+  recovered <- function(fl) vapply(seq_len(nrow(reg)), function(i) {
+    r <- reg[i]; s <- side[[as.character(fl)]]
+    if (is.null(s)) return(FALSE)
+    cores <- canon_sig[Chr == r$Chr & to >= r$from & from <= r$to, core_snp]
+    any(cores %in% s$sig$core_snp) && nrow(s$regions[Chr == r$Chr & to >= r$from & from <= r$to]) > 0
+  }, logical(1))
 
-  rows <- lapply(unique(canon_units$region_id), function(rid) {
-    core_snps <- canon_units[region_id == rid, core_snp]
-    sp <- spans[region_id == rid]
-    row <- data.table::data.table(region_id = rid, Chr = sp$Chr, from = sp$from, to = sp$to)
-    n_ticks <- 1L   # the canonical floor itself always counts
-    for (fl in side_floors) {
-      su <- side_lookup[[as.character(fl)]]
-      hit <- if (!is.null(su)) su[core_snp %in% core_snps][1] else NULL
-      recovered <- !is.null(hit) && nrow(hit) > 0 && !is.na(hit$core_snp[1])
-      overlap_ok <- NA
-      if (isTRUE(recovered)) {
-        overlap_ok <- hit$side_from[1] <= sp$to && hit$side_to[1] >= sp$from
-        n_ticks <- n_ticks + 1L
-      }
-      ## data.table::set(), not row[[col]] <- value: the latter is a base-R
-      ## list assignment that data.table only tolerates via a defensive
-      ## shallow copy (and warns about it, harmlessly but noisily, every
-      ## single call) -- set() adds the column by reference, as intended.
-      data.table::set(row, j = tick_col(fl), value = isTRUE(recovered))
-      data.table::set(row, j = check_col(fl), value = overlap_ok)
-    }
-    row[, `:=`(n_ticks = n_ticks,
-              stability_tier = sprintf("%d/%d", n_ticks, length(side_floors) + 1L))]
-    row
-  })
-
-  out <- data.table::rbindlist(rows, fill = TRUE)
-  ## -n_ticks/-span, not -stability_tier: that column is a display STRING
-  ## ("3/3") -- setorder() needs the underlying numeric count to sort
-  ## descending, and setorder() takes column names, not arbitrary expressions
-  ## like -(to - from), hence the explicit `span` column (kept in the output,
-  ## not just a sort key -- "physical span" was asked for as its own column).
-  out[, span := to - from]
+  out <- reg[, .(region_id = sprintf("%s:%d-%d", Chr, as.integer(from), as.integer(to)), Chr, from, to)]
+  for (fl in side_floors) data.table::set(out, j = sprintf("tick_%03d", round(fl)), value = recovered(fl))
+  tick_cols <- grep("^tick_", names(out), value = TRUE)
+  out[, n_ticks := 1L + rowSums(.SD), .SDcols = tick_cols]
+  out[, `:=`(stability_tier = sprintf("%d/%d", n_ticks, length(side_floors) + 1L), span = to - from)]
   data.table::setorder(out, -n_ticks, -span)
   out[]
 }
@@ -169,7 +129,7 @@ run_floor_profile <- function(dataset_dir, cfg = resolve_config(dataset_dir), fa
                               annotation = NULL, chrom_lengths = NULL,
                               canonical_unsuffixed = FALSE, force = FALSE) {
   if (!file.exists(file.path(dataset_dir, "input", "phenotype.rds")))
-    stop("run_floor_profile() needs input/phenotype.rds (Stage A must be able to run).")
+    stop("run_floor_profile() needs input/phenotype.rds (the association scan must be able to run).")
 
   ## force NOT forwarded here -- same reason run_stage_A()/run_stage_B()/
   ## check_structure_alignment() never forward theirs either: when called
@@ -187,7 +147,6 @@ run_floor_profile <- function(dataset_dir, cfg = resolve_config(dataset_dir), fa
   say("=== %s: floor profile -- floors %d / %d (reported) / %d ===\n",
       basename(dataset_dir), low_floor, canon_floor, high_floor)
 
-  snp_results_by_floor <- list(unit = list(), simes = list())
   test_by_floor <- list(unit = list(), simes = list())
   canon_suffix <- if (canonical_unsuffixed) "" else sprintf("_floor%d", canon_floor)
 
@@ -200,7 +159,6 @@ run_floor_profile <- function(dataset_dir, cfg = resolve_config(dataset_dir), fa
     r <- run_stage_B(dataset_dir, paste0("emmax_unit", canon_suffix), statistic = "unit", cfg = cfg_c,
                      annotation = annotation, chrom_lengths = chrom_lengths, force = force)
     test_by_floor$unit[[as.character(canon_floor)]] <- r$test
-    snp_results_by_floor$unit[[as.character(canon_floor)]] <- r$snp_results
   }
   simes_dir <- file.path(dataset_dir, "output", "pvalues", "emmax_simes")
   simes_p_obs <- NULL
@@ -219,7 +177,6 @@ run_floor_profile <- function(dataset_dir, cfg = resolve_config(dataset_dir), fa
                      statistic = "simes", cfg = cfg_c,
                      annotation = annotation, chrom_lengths = chrom_lengths, force = force)
     test_by_floor$simes[[as.character(canon_floor)]] <- r$test
-    snp_results_by_floor$simes[[as.character(canon_floor)]] <- r$snp_results
   }
 
   ## ---- comparison floors: observed only ------------------------------------
@@ -244,7 +201,6 @@ run_floor_profile <- function(dataset_dir, cfg = resolve_config(dataset_dir), fa
                        p_display = as.numeric(a_low$p_obs_marker[s1$map$marker]),
                        statistic = "unit", cfg = cfg_fl, observed_only = TRUE, force = force)
       test_by_floor$unit[[as.character(fl)]] <- r$test
-      snp_results_by_floor$unit[[as.character(fl)]] <- r$snp_results
     }
   }
   if ("simes" %in% cfg$statistics) {
@@ -254,7 +210,6 @@ run_floor_profile <- function(dataset_dir, cfg = resolve_config(dataset_dir), fa
                        statistic = "simes", cfg = utils::modifyList(cfg, list(size_floor = fl)),
                        observed_only = TRUE, force = force)
       test_by_floor$simes[[as.character(fl)]] <- r$test
-      snp_results_by_floor$simes[[as.character(fl)]] <- r$snp_results
     }
   }
 
@@ -262,7 +217,7 @@ run_floor_profile <- function(dataset_dir, cfg = resolve_config(dataset_dir), fa
   regions <- list()
   summary_rows <- list()
   for (stat in intersect(c("unit", "simes"), cfg$statistics)) {
-    tab <- .floor_stability_table(snp_results_by_floor[[stat]], canon_floor, side_floors, s1$stage1, s1$map)
+    tab <- .floor_stability_table(test_by_floor[[stat]], canon_floor, side_floors, s1$stage1, s1$map)
     regions[[stat]] <- tab
     data.table::fwrite(tab, file.path(out_dir, sprintf("canonical_regions_%s.csv", stat)))
     canon_test <- test_by_floor[[stat]][[as.character(canon_floor)]]

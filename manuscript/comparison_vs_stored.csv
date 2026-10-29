@@ -4,66 +4,106 @@ panel,arm,metric,module,multi,reference,match
 3sp,Stage 1,same cluster membership,-,TRUE,,TRUE
 3sp,Stage 1,GRM markers,614897,614897,,TRUE
 3sp,Stage 1,GRM: max |difference|,-,0,,TRUE
-3sp,EMMAX consensus,units tested,1356,1356,1356,TRUE
-3sp,EMMAX consensus,significant units,97,97,97,TRUE
-3sp,EMMAX consensus,reported regions,39,39,39,TRUE
-3sp,EMMAX consensus,same significant units,-,TRUE,TRUE,TRUE
-3sp,EMMAX consensus,same region spans,-,TRUE,TRUE,TRUE
-3sp,EMMAX consensus,max |unit p difference|,-,0,0,TRUE
-3sp,EMMAX consensus,permutation: observed,97,97,97,TRUE
-3sp,EMMAX consensus,permutation: null mean,3.476,3.476,3.476,TRUE
-3sp,EMMAX consensus,permutation: p,0.00799201,0.00799201,0.00799201,TRUE
-3sp,EMMAX consensus,permutation: same surrogate counts,-,TRUE,TRUE,TRUE
-3sp,EMMAX consensus,EcoPeaks: regions overlapping,13,13,13,TRUE
-3sp,EMMAX consensus,EcoPeaks: relocation null mean,4.4423,4.4546,4.4546,FALSE
-3sp,EMMAX consensus,EcoPeaks: fold,2.92641,2.91833,2.91833,FALSE
-3sp,EMMAX consensus,EcoPeaks: p,0.00009999,0.00019998,0.00019998,FALSE
-3sp,EMMAX Simes,units tested,1356,1356,1356,TRUE
-3sp,EMMAX Simes,significant units,74,74,74,TRUE
-3sp,EMMAX Simes,reported regions,35,35,35,TRUE
-3sp,EMMAX Simes,same significant units,-,TRUE,TRUE,TRUE
-3sp,EMMAX Simes,same region spans,-,TRUE,TRUE,TRUE
-3sp,EMMAX Simes,max |unit p difference|,-,0,0,TRUE
-3sp,EMMAX Simes,permutation: observed,74,74,74,TRUE
-3sp,EMMAX Simes,permutation: null mean,2.95,2.95,2.95,TRUE
-3sp,EMMAX Simes,permutation: p,0.0149254,0.0149254,0.0149254,TRUE
-3sp,EMMAX Simes,permutation: same surrogate counts,-,TRUE,TRUE,TRUE
-3sp,EMMAX Simes,EcoPeaks: regions overlapping,10,10,10,TRUE
-3sp,EMMAX Simes,EcoPeaks: relocation null mean,3.8066,3.8185,3.8185,FALSE
-3sp,EMMAX Simes,EcoPeaks: fold,2.62702,2.61883,2.61883,FALSE
-3sp,EMMAX Simes,EcoPeaks: p,0.00189981,0.00149985,0.00149985,FALSE
-3sp,LFMM Simes,units tested,1356,1356,1356,TRUE
-3sp,LFMM Simes,significant units,72,72,72,TRUE
-3sp,LFMM Simes,reported regions,50,50,50,TRUE
-3sp,LFMM Simes,same significant units,-,TRUE,TRUE,TRUE
-3sp,LFMM Simes,same region spans,-,TRUE,TRUE,TRUE
-3sp,LFMM Simes,max |unit p difference|,-,0,0,TRUE
-3sp,LFMM Simes,EcoPeaks: regions overlapping,10,10,10,TRUE
-3sp,LFMM Simes,EcoPeaks: relocation null mean,6.5667,6.5672,6.5672,FALSE
-3sp,LFMM Simes,EcoPeaks: fold,1.52283,1.52272,1.52272,FALSE
-3sp,LFMM Simes,EcoPeaks: p,0.0974903,0.0968903,0.0968903,FALSE
+3sp,EMMAX consensus,units tested,1356,1356,,TRUE
+3sp,EMMAX consensus,significant units,97,97,,TRUE
+3sp,EMMAX consensus,reported regions,39,39,,TRUE
+3sp,EMMAX consensus,same significant units,-,TRUE,,TRUE
+3sp,EMMAX consensus,same region spans,-,TRUE,,TRUE
+3sp,EMMAX consensus,max |unit p difference|,-,0,,TRUE
+3sp,EMMAX consensus,permutation: observed,97,97,,TRUE
+3sp,EMMAX consensus,permutation: null mean,3.476,3.476,,TRUE
+3sp,EMMAX consensus,permutation: p,0.00799201,0.00799201,,TRUE
+3sp,EMMAX consensus,permutation: same surrogate counts,-,TRUE,,TRUE
+3sp,EMMAX consensus,EcoPeaks: regions overlapping,13,13,,TRUE
+3sp,EMMAX consensus,EcoPeaks: relocation null mean,4.4423,4.4546,,FALSE
+3sp,EMMAX consensus,EcoPeaks: fold,2.92641,2.91833,,FALSE
+3sp,EMMAX consensus,EcoPeaks: p,0.00009999,0.00019998,,FALSE
+3sp,EMMAX Simes,units tested,1356,1356,,TRUE
+3sp,EMMAX Simes,significant units,74,74,,TRUE
+3sp,EMMAX Simes,reported regions,35,35,,TRUE
+3sp,EMMAX Simes,same significant units,-,TRUE,,TRUE
+3sp,EMMAX Simes,same region spans,-,TRUE,,TRUE
+3sp,EMMAX Simes,max |unit p difference|,-,0,,TRUE
+3sp,EMMAX Simes,permutation: observed,74,74,,TRUE
+3sp,EMMAX Simes,permutation: null mean,2.95,2.95,,TRUE
+3sp,EMMAX Simes,permutation: p,0.0149254,0.0149254,,TRUE
+3sp,EMMAX Simes,permutation: same surrogate counts,-,TRUE,,TRUE
+3sp,EMMAX Simes,EcoPeaks: regions overlapping,10,10,,TRUE
+3sp,EMMAX Simes,EcoPeaks: relocation null mean,3.8066,3.8185,,FALSE
+3sp,EMMAX Simes,EcoPeaks: fold,2.62702,2.61883,,FALSE
+3sp,EMMAX Simes,EcoPeaks: p,0.00189981,0.00149985,,FALSE
+3sp,LFMM Simes,units tested,1356,1356,,TRUE
+3sp,LFMM Simes,significant units,72,72,,TRUE
+3sp,LFMM Simes,reported regions,50,50,,TRUE
+3sp,LFMM Simes,same significant units,-,TRUE,,TRUE
+3sp,LFMM Simes,same region spans,-,TRUE,,TRUE
+3sp,LFMM Simes,max |unit p difference|,-,0,,TRUE
+3sp,LFMM Simes,EcoPeaks: regions overlapping,10,10,,TRUE
+3sp,LFMM Simes,EcoPeaks: relocation null mean,6.5667,6.5672,,FALSE
+3sp,LFMM Simes,EcoPeaks: fold,1.52283,1.52272,,FALSE
+3sp,LFMM Simes,EcoPeaks: p,0.0974903,0.0968903,,FALSE
+3sp,EMMAX consensus,floor tier 3/3: regions,4,4,,TRUE
+3sp,EMMAX consensus,floor tier 2/3: regions,10,10,,TRUE
+3sp,EMMAX consensus,floor tier 1/3: regions,25,25,,TRUE
+3sp,EMMAX consensus,floor tiers: same tier for every region,-,TRUE,,TRUE
+3sp,EMMAX Simes,floor tier 3/3: regions,5,5,,TRUE
+3sp,EMMAX Simes,floor tier 2/3: regions,7,7,,TRUE
+3sp,EMMAX Simes,floor tier 1/3: regions,23,23,,TRUE
+3sp,EMMAX Simes,floor tiers: same tier for every region,-,TRUE,,TRUE
+3sp,EMMAX consensus,"EcoPeaks, tier >=2/3: regions overlapping",8,8,,TRUE
+3sp,EMMAX consensus,"EcoPeaks, tier >=2/3: fold",3.80662,3.80662,,TRUE
+3sp,EMMAX consensus,"EcoPeaks, tier >=2/3: p",0.00009999,0.00009999,,TRUE
+3sp,EMMAX consensus,"EcoPeaks, tier 3/3: regions overlapping",3,3,,TRUE
+3sp,EMMAX consensus,"EcoPeaks, tier 3/3: fold",3.55577,3.55577,,TRUE
+3sp,EMMAX consensus,"EcoPeaks, tier 3/3: p",0.0236976,0.0236976,,TRUE
+3sp,EMMAX consensus,"EcoPeaks, tier 2/3 only: regions overlapping",5,5,,TRUE
+3sp,EMMAX consensus,"EcoPeaks, tier 2/3 only: fold",3.95977,3.95977,,TRUE
+3sp,EMMAX consensus,"EcoPeaks, tier 2/3 only: p",0.00069993,0.00069993,,TRUE
+3sp,EMMAX consensus,"EcoPeaks, tier 1/3 only: regions overlapping",5,5,,TRUE
+3sp,EMMAX consensus,"EcoPeaks, tier 1/3 only: fold",2.10615,2.10615,,TRUE
+3sp,EMMAX consensus,"EcoPeaks, tier 1/3 only: p",0.0666933,0.0666933,,TRUE
+3sp,EMMAX Simes,"EcoPeaks, tier >=2/3: regions overlapping",7,7,,TRUE
+3sp,EMMAX Simes,"EcoPeaks, tier >=2/3: fold",3.41447,3.41447,,TRUE
+3sp,EMMAX Simes,"EcoPeaks, tier >=2/3: p",0.00089991,0.00089991,,TRUE
+3sp,EMMAX Simes,"EcoPeaks, tier 3/3: regions overlapping",4,4,,TRUE
+3sp,EMMAX Simes,"EcoPeaks, tier 3/3: fold",4.14036,4.14036,,TRUE
+3sp,EMMAX Simes,"EcoPeaks, tier 3/3: p",0.00389961,0.00389961,,TRUE
+3sp,EMMAX Simes,"EcoPeaks, tier 2/3 only: regions overlapping",3,3,,TRUE
+3sp,EMMAX Simes,"EcoPeaks, tier 2/3 only: fold",2.76651,2.76651,,TRUE
+3sp,EMMAX Simes,"EcoPeaks, tier 2/3 only: p",0.0573943,0.0573943,,TRUE
+3sp,EMMAX Simes,"EcoPeaks, tier 1/3 only: regions overlapping",3,3,,TRUE
+3sp,EMMAX Simes,"EcoPeaks, tier 1/3 only: fold",1.68086,1.68086,,TRUE
+3sp,EMMAX Simes,"EcoPeaks, tier 1/3 only: p",0.258274,0.258274,,TRUE
 9sp,Stage 1,LD decay: max |difference| (decay_sum),-,0,,TRUE
 9sp,Stage 1,clusters,753625,753625,,TRUE
 9sp,Stage 1,same cluster membership,-,TRUE,,TRUE
 9sp,Stage 1,GRM markers,753625,753625,,TRUE
 9sp,Stage 1,GRM: max |difference|,-,0,,TRUE
-9sp,EMMAX consensus,units tested,2784,2784,2784,TRUE
-9sp,EMMAX consensus,significant units,54,54,54,TRUE
-9sp,EMMAX consensus,reported regions,20,20,20,TRUE
-9sp,EMMAX consensus,same significant units,-,TRUE,TRUE,TRUE
-9sp,EMMAX consensus,same region spans,-,TRUE,TRUE,TRUE
-9sp,EMMAX consensus,max |unit p difference|,-,0,0,TRUE
-9sp,EMMAX consensus,permutation: observed,54,54,54,TRUE
-9sp,EMMAX consensus,permutation: null mean,49.34,49.34,49.34,TRUE
-9sp,EMMAX consensus,permutation: p,0.260739,0.260739,0.260739,TRUE
-9sp,EMMAX consensus,permutation: same surrogate counts,-,TRUE,TRUE,TRUE
-9sp,EMMAX Simes,units tested,2784,2784,2784,TRUE
-9sp,EMMAX Simes,significant units,22,22,22,TRUE
-9sp,EMMAX Simes,reported regions,13,13,13,TRUE
-9sp,EMMAX Simes,same significant units,-,TRUE,TRUE,TRUE
-9sp,EMMAX Simes,same region spans,-,TRUE,TRUE,TRUE
-9sp,EMMAX Simes,max |unit p difference|,-,0,0,TRUE
-9sp,EMMAX Simes,permutation: observed,22,22,22,TRUE
-9sp,EMMAX Simes,permutation: null mean,42.23,42.23,42.23,TRUE
-9sp,EMMAX Simes,permutation: p,0.512438,0.512438,0.512438,TRUE
-9sp,EMMAX Simes,permutation: same surrogate counts,-,TRUE,TRUE,TRUE
+9sp,EMMAX consensus,units tested,2784,2784,,TRUE
+9sp,EMMAX consensus,significant units,54,54,,TRUE
+9sp,EMMAX consensus,reported regions,20,20,,TRUE
+9sp,EMMAX consensus,same significant units,-,TRUE,,TRUE
+9sp,EMMAX consensus,same region spans,-,TRUE,,TRUE
+9sp,EMMAX consensus,max |unit p difference|,-,0,,TRUE
+9sp,EMMAX consensus,permutation: observed,54,54,,TRUE
+9sp,EMMAX consensus,permutation: null mean,49.34,49.34,,TRUE
+9sp,EMMAX consensus,permutation: p,0.260739,0.260739,,TRUE
+9sp,EMMAX consensus,permutation: same surrogate counts,-,TRUE,,TRUE
+9sp,EMMAX Simes,units tested,2784,2784,,TRUE
+9sp,EMMAX Simes,significant units,22,22,,TRUE
+9sp,EMMAX Simes,reported regions,13,13,,TRUE
+9sp,EMMAX Simes,same significant units,-,TRUE,,TRUE
+9sp,EMMAX Simes,same region spans,-,TRUE,,TRUE
+9sp,EMMAX Simes,max |unit p difference|,-,0,,TRUE
+9sp,EMMAX Simes,permutation: observed,22,22,,TRUE
+9sp,EMMAX Simes,permutation: null mean,42.23,42.23,,TRUE
+9sp,EMMAX Simes,permutation: p,0.512438,0.512438,,TRUE
+9sp,EMMAX Simes,permutation: same surrogate counts,-,TRUE,,TRUE
+9sp,EMMAX consensus,floor tier 3/3: regions,3,3,,TRUE
+9sp,EMMAX consensus,floor tier 2/3: regions,6,6,,TRUE
+9sp,EMMAX consensus,floor tier 1/3: regions,11,11,,TRUE
+9sp,EMMAX consensus,floor tiers: same tier for every region,-,TRUE,,TRUE
+9sp,EMMAX Simes,floor tier 3/3: regions,2,2,,TRUE
+9sp,EMMAX Simes,floor tier 2/3: regions,6,6,,TRUE
+9sp,EMMAX Simes,floor tier 1/3: regions,5,5,,TRUE
+9sp,EMMAX Simes,floor tiers: same tier for every region,-,TRUE,,TRUE
