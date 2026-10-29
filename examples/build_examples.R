@@ -15,26 +15,40 @@
 ##                                figure_manhattan.R). Also carries an
 ##                                external_pvalues/lfmm.rds, aligned the same
 ##                                way module_3sp/R/04_lfmm.R aligns it, to
-##                                demonstrate Stage B on a non-EMMAX engine.
+##                                demonstrate unit testing on a non-EMMAX engine.
 ##   examples/9sp_chr19_chr20/   nine-spine stickleback, Chr19 + Chr20 -- a
 ##                                second species, different sample size and
 ##                                population structure (see module_9sp/R/
 ##                                00_config.R), no external p-value engine.
 ##
-## NOT RUN as part of the pipeline itself -- run once to (re)generate the
-## example inputs, checked in under examples/ (small: two chromosomes, not
-## the genome).
+## MAINTAINER ONLY, not part of the pipeline: users get the generated inputs
+## checked in under examples/. It needs a local LDscnR-paper checkout with the
+## module bundles (environment variable LDSCNR_PAPER, as in
+## manuscript/build_inputs.R). It writes the data files only; the hand-written
+## input/perm_fun.R files are committed as they are and left untouched.
+##
+## Run from the repository root:
+##   LDSCNR_PAPER=/path/to/LDscnR-paper Rscript examples/build_examples.R [OUT_DIR]
+## OUT_DIR defaults to examples/.
 ## =============================================================================
 suppressMessages(library(data.table))
 
-HERE <- path.expand("~/gitlab/LDscnR-multi/examples")
+args <- commandArgs(trailingOnly = TRUE)
+HERE <- if (length(args)) args[[1]] else "examples"
+PAPER <- path.expand(Sys.getenv("LDSCNR_PAPER", "../LDscnR-paper"))
+stopifnot("set LDSCNR_PAPER to an LDscnR-paper checkout" = dir.exists(PAPER))
+## the modules' 00_config.R resolve their own paths from LDSCNR_PAPER_ROOT
+if (!nzchar(Sys.getenv("LDSCNR_PAPER_ROOT"))) Sys.setenv(LDSCNR_PAPER_ROOT = PAPER)
 
 ## `pheno`/`structure_col`: optional. When given, also writes
 ## input/population.rds (from pheno$pop_ID) and input/structure_group.rds
 ## (from pheno[[structure_col]]) for the structure-alignment diagnostic --
 ## see R/08_structure_alignment.R. `pheno` must be in the same row order as
 ## GTs/eco (true of both bundles here; never re-sorted).
-write_example <- function(out_dir, GTs, map, eco, chrs, pheno = NULL, structure_col = NULL) {
+## `covariate_col`: optional column of `pheno` written as input/covariate.rds
+## (the 9sp lineage covariate, as in module_9sp/R/03_EMMAX.R).
+write_example <- function(out_dir, GTs, map, eco, chrs, pheno = NULL, structure_col = NULL,
+                          covariate_col = NULL) {
   keep <- map$Chr %in% chrs
   map_sub <- map[keep, .(marker, Chr, Pos)]
   GT_sub <- GTs[, keep, drop = FALSE]
@@ -58,12 +72,17 @@ write_example <- function(out_dir, GTs, map, eco, chrs, pheno = NULL, structure_
     cat(sprintf("  wrote population.rds (%d pops) + structure_group.rds (from %s, %d groups)\n",
                 length(unique(pheno$pop_ID)), structure_col, length(unique(pheno[[structure_col]]))))
   }
+  if (!is.null(covariate_col)) {
+    saveRDS(stats::setNames(as.character(pheno[[covariate_col]]), rownames(GT_sub)),
+            file.path(in_dir, "covariate.rds"))
+    cat(sprintf("  wrote covariate.rds (from %s)\n", covariate_col))
+  }
   map_sub
 }
 
 ## ---- 3sp: Chr1 + Chr4 ----------------------------------------------------------
 cat("[1] 3sp (Chr1 + Chr4)\n")
-b3 <- readRDS(path.expand("~/gitlab/LDscnR-paper/module_3sp/out/02_bundle/bundle.rds"))
+b3 <- readRDS(file.path(PAPER, "module_3sp", "out", "02_bundle", "bundle.rds"))
 map3_sub <- write_example(file.path(HERE, "3sp_chr1_chr4"), b3$GTs, b3$map, b3$eco, c("Chr1", "Chr4"),
                           pheno = b3$pheno, structure_col = "pop_locality")
 
@@ -73,7 +92,7 @@ map3_sub <- write_example(file.path(HERE, "3sp_chr1_chr4"), b3$GTs, b3$map, b3$e
 ## the only way to recover correct alignment; lfmm_F.rds is over the FULL
 ## PRE-MAF map, in map_3sp's own row order).
 cfg3 <- new.env()
-sys.source(path.expand("~/gitlab/LDscnR-paper/module_3sp/R/00_config.R"), envir = cfg3)
+sys.source(file.path(PAPER, "module_3sp", "R", "00_config.R"), envir = cfg3)
 e <- new.env(); load(cfg3$PATHS$raw_3sp, envir = e)
 keep_maf <- e$map_3sp$maf > cfg3$MAF_KEEP
 lfmm_F_full <- readRDS(cfg3$PATHS$lfmm_F)
@@ -87,13 +106,15 @@ dir.create(ext_dir, recursive = TRUE, showWarnings = FALSE)
 saveRDS(lfmm_p_sub, file.path(ext_dir, "lfmm.rds"))
 cat(sprintf("  wrote %s: %s LFMM p-values\n", file.path(ext_dir, "lfmm.rds"),
             format(length(lfmm_p_sub), big.mark = ",")))
-rm(b3, e); gc()
+rm(b3, e); invisible(gc())
 
 ## ---- 9sp: Chr19 + Chr20 ---------------------------------------------------------
 cat("\n[2] 9sp (Chr19 + Chr20)\n")
-b9 <- readRDS(path.expand("~/gitlab/LDscnR-paper/module_9sp/out/02_bundle/bundle.rds"))
-write_example(file.path(HERE, "9sp_chr19_chr20"), b9$GTs, b9$map, b9$eco, c("Chr19", "Chr20"),
-             pheno = b9$pheno, structure_col = "lineage")
-rm(b9); gc()
+cfg9 <- new.env()
+sys.source(file.path(PAPER, "module_9sp", "R", "00_config.R"), envir = cfg9)
+b9 <- readRDS(file.path(PAPER, "module_9sp", "out", "02_bundle", "bundle.rds"))
+invisible(write_example(file.path(HERE, "9sp_chr19_chr20"), b9$GTs, b9$map, b9$eco, c("Chr19", "Chr20"),
+             pheno = b9$pheno, structure_col = "lineage", covariate_col = cfg9$EMMAX_COVAR))
+rm(b9); invisible(gc())
 
 cat("\ndone.\n")

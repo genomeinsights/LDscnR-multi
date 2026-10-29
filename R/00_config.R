@@ -69,7 +69,7 @@ DEFAULTS <- list(
 ## their remotes::install_github RemoteSha; local development sessions can
 ## opt into the stricter source-tree hash check with LDSCNR_DEV_LOAD_ALL=1.
 LDSCNR_PIN <- list(
-  repo    = path.expand("~/gitlab/LDscnR"),
+  repo    = path.expand(Sys.getenv("LDSCNR_REPO", "../LDscnR")),   # LDSCNR_DEV_LOAD_ALL=1 only
   ## outlier-scan (the branch this was first pinned to) was fast-forwarded
   ## into main and development has continued there since -- outlier-scan
   ## itself is now a stale ancestor, not a separate line.

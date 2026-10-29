@@ -3,8 +3,8 @@
 ##
 ## GENOME-WIDE MANHATTAN PLOTTING, styled directly after the ACTUAL plotting
 ## code (not just the rendered image) of
-## ~/gitlab/formica_hybrid/module_manuscript_rho05/module_BayPass/R/
-## formica_region_concordance.R's make_panel()/build_block(), which produces
+## an earlier BayPass analysis (formica_region_concordance.R,
+## make_panel()/build_block(), which produces
 ## figures/formica_local_score_vs_ld_regions.png: a single continuous genome
 ## axis (chromosomes concatenated, not faceted into separate per-chromosome
 ## panels), grey background points (colour = "grey73", size = 0.45, alpha =
@@ -80,7 +80,7 @@
 
 ## Locus colour assignment, ported verbatim (algorithm, not code) from the
 ## reference figure's own R/formica_region_concordance.R
-## (~/gitlab/formica_hybrid/module_manuscript_rho05/module_BayPass):
+## (that earlier BayPass analysis):
 ## LDscnR::default_cluster_colours(), filtered to drop near-white entries
 ## (invisible against a white panel background) by standard luminance, then
 ## walked in genomic order (the order `loci` is already sorted in) picking

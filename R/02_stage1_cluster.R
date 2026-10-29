@@ -123,8 +123,8 @@ build_stage1 <- function(dataset_dir, cfg = resolve_config(dataset_dir), force =
   ## bug in snpgdsGRM() itself: with missing.rate = 1 (exclude nothing),
   ## snpgdsGRM()'s own GCTA formula on the SAME missing data matches an
   ## independently-implemented, pairwise-complete-observations R
-  ## reimplementation (~/gitlab/pike_phenology/R/grm_functions.R's
-  ## gcta_grm(), verified there to reproduce snpgdsGRM(GCTA) to machine
+  ## reimplementation (a separate project's gcta_grm(),
+  ## verified there to reproduce snpgdsGRM(GCTA) to machine
   ## precision on complete data) to machine precision too -- the bug is
   ## entirely the default marker-exclusion threshold, not the arithmetic.
   ## Diagnosed against real missing-genotype data 2026-09-30 (see also
