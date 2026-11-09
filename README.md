@@ -189,10 +189,15 @@ manuscript modules' bundles. Only maintainers need it (see its header).
                          sampling group (locality or lineage, for example).
                          Defaults to population.rds when absent.
     covariate.rds        optional. Named vector from individual to a structure
-                         covariate, such as lineage. When present, the
-                         phenotype is replaced by resid(lm(y ~ covariate))
-                         before EMMAX, and every permuted phenotype is
-                         residualised in the same way.
+                         covariate, such as lineage, treated as a factor. By
+                         default (covariate_method = "gls") it is a fixed
+                         effect in the EMMAX model, so every marker or unit is
+                         tested conditional on it, for the observed and every
+                         permuted phenotype. covariate_method = "residualise"
+                         instead replaces the phenotype by
+                         resid(lm(y ~ covariate)) before EMMAX, and residualises
+                         every permuted phenotype in the same way. The
+                         manuscript's nine-spined numbers used "residualise".
     config.R             optional. Plain R that assigns any DEFAULTS name from
                          R/00_config.R (for example cr_rho <- 0.35) to
                          override it for this data set only.

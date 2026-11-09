@@ -153,7 +153,9 @@
                    class = "ld_complexity_reduction")
   pr <- ld_prune_and_eMLG(GTs = GTs[, mk_sig, drop = FALSE], stage1 = sub,
                           ld_w_col = "n_loci", ld_w_threshold = 0,
-                          LD_decay = LD_decay, min_r2_rho = stage1$params$rho,
+                          LD_decay = LD_decay,
+                          r2_rho = if (is.null(stage1$params$r2_rho)) stage1$params$rho
+                                   else stage1$params$r2_rho,
                           score_threshold = p$score_threshold,
                           distance_threshold = p$distance_threshold,
                           compute_unflagged_eMLG = FALSE, min_n_loci_eMLG = 1,

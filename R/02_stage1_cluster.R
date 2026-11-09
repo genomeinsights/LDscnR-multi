@@ -85,6 +85,10 @@ build_stage1 <- function(dataset_dir, cfg = resolve_config(dataset_dir), force =
   ## compared. See the LD-decay report (R/10_ld_decay_report.R) for tuning
   ## `slide` itself, the other lever on `el` size.
   decay_args <- utils::modifyList(cfg$decay_args, list(gds = gds, seed = cfg$seed))
+  ## The config keeps the pre-0.9.2 key `min_maf_decay`, because decay_args is
+  ## part of this stage's cache key and renaming it would invalidate every
+  ## existing stage-1 cache. It is renamed here, for compute_LD_decay().
+  names(decay_args)[names(decay_args) == "min_maf_decay"] <- "maf_min_decay"
   LD_decay <- do.call(compute_LD_decay, decay_args)
 
   say("    [stage1] ld_w (rho = 0.95) per marker\n")
@@ -97,10 +101,10 @@ build_stage1 <- function(dataset_dir, cfg = resolve_config(dataset_dir), force =
   ## serial execution here keeps this correct rather than merely usually
   ## working; a smaller, calibrated `slide` keeps each chromosome's rebuild
   ## cheap enough that this doesn't dominate runtime.
-  ldw <- compute_ld_w(LD_decay, rho = 0.95, cores = 1, gds = gds)   # single rho -> plain named vector
+  ldw <- compute_ld_w(LD_decay, dist_rho = 0.95, cores = 1, gds = gds)   # single rho -> plain named vector
   map$ld_w_095 <- as.numeric(ldw[map$marker])
 
-  stage1 <- ld_complexity_reduction(map = map, LD_decay = LD_decay, rho = cfg$cr_rho,
+  stage1 <- ld_complexity_reduction(map = map, LD_decay = LD_decay, r2_rho = cfg$cr_rho,
                                     cores = cfg$cores, gds = gds_path)
 
   grm_markers <- unique(stats::na.omit(stage1$pruned))

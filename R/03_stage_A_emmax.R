@@ -32,9 +32,11 @@
 ## Run permutation index `b` through `perm_fun` and `emmax_fast`, seeded the
 ## same way module_3sp's p_perm closures are (`set.seed(bb)` per draw) so a
 ## rerun with the same B reproduces the same surrogate matrix.
-## `y` is the RAW phenotype: perm_fun() permutes it and the surrogate is then
-## residualised on `covariate` (if any), exactly as the observed phenotype is
-## (adjust_phenotype(), R/01_dataset_io.R).
+## `y` is the RAW phenotype: perm_fun() permutes it. Under covariate_method =
+## "residualise" the surrogate is then residualised on `covariate` (if any),
+## exactly as the observed phenotype is (adjust_phenotype(),
+## R/01_dataset_io.R); under "gls" `covariate` is NULL here, because the
+## covariate is already a fixed effect in `prep` and scores every surrogate.
 .emmax_perm_matrix <- function(prep, y, perm_fun, B, cores = 1L, covariate = NULL) {
   one <- function(b) { set.seed(b); emmax_fast(prep, adjust_phenotype(perm_fun(b, y), covariate)) }
   cols <- if (cores > 1L) parallel::mclapply(seq_len(B), one, mc.cores = cores) else lapply(seq_len(B), one)
@@ -85,14 +87,20 @@ run_stage_A <- function(dataset_dir, cfg = resolve_config(dataset_dir), force = 
   d  <- read_dataset(dataset_dir, need_phenotype = TRUE)
   perm_fun <- resolve_perm_fun(dataset_dir)
   GRM <- s1$GRM
-  ## Optional structure covariate (input/covariate.rds): the tested phenotype
-  ## is resid(lm(y ~ covariate)); permutations act on the raw phenotype and are
-  ## residualised the same way (see .emmax_perm_matrix()).
-  y_test <- adjust_phenotype(d$phenotype, d$covariate)
+  ## Optional structure covariate (input/covariate.rds). "gls": a fixed effect
+  ## in every emmax_setup() below (covar), so observed and permuted phenotypes
+  ## are both tested conditional on it; permutations act on the raw phenotype.
+  ## "residualise": the tested phenotype is resid(lm(y ~ covariate)), and
+  ## permutations are residualised the same way (see .emmax_perm_matrix()).
+  cov_method <- match.arg(cfg$covariate_method, c("gls", "residualise"))
+  covar <- if (!is.null(d$covariate) && cov_method == "gls") factor(d$covariate)
+  covariate_resid <- if (cov_method == "residualise") d$covariate
+  y_test <- adjust_phenotype(d$phenotype, covariate_resid)
   if (!is.null(d$covariate))
-    say("    [association scan] phenotype residualised on input/covariate.rds (%d groups, R^2 = %.3f)\n",
+    say("    [association scan] input/covariate.rds (%d groups, R^2 = %.3f) %s\n",
         length(unique(d$covariate)),
-        summary(stats::lm(as.numeric(d$phenotype) ~ d$covariate))$r.squared)
+        summary(stats::lm(as.numeric(d$phenotype) ~ d$covariate))$r.squared,
+        if (cov_method == "gls") "fitted as a fixed effect (GLS)" else "residualised out of the phenotype")
 
   out <- list()
   ## Depends on cache/'s own receipt, not just the raw input files: without
@@ -117,7 +125,7 @@ run_stage_A <- function(dataset_dir, cfg = resolve_config(dataset_dir), force = 
     cache <- NULL
     function() {
       if (is.null(cache)) {
-        prep <- emmax_setup(s1$genotypes, GRM)
+        prep <- emmax_setup(s1$genotypes, GRM, covar = covar)
         p_obs <- emmax_fast(prep, y_test)
         names(p_obs) <- colnames(s1$genotypes)
         cache <<- list(prep = prep, p_obs = p_obs)
@@ -130,16 +138,18 @@ run_stage_A <- function(dataset_dir, cfg = resolve_config(dataset_dir), force = 
     out_dir <- file.path(dataset_dir, "output", "pvalues", paste0("emmax_unit", engine_suffix))
     params <- list(cr_rho = cfg$cr_rho, size_floor = cfg$size_floor, unit_repr = cfg$unit_repr,
                    grm_method = cfg$grm_method, b = cfg$b_unit, seed = cfg$seed, permute = permute)
+    ## Only with a covariate, so receipts of covariate-free datasets stay valid.
+    if (!is.null(d$covariate)) params$covariate_method <- cov_method
     if (force || stage_stale(out_dir, stage_inputs, params, label = paste0("emmax_unit", engine_suffix))) {
       say("    [emmax_unit%s] ld_unit_matrix(repr = \"%s\", size_floor = %d) + emmax_fast%s\n",
           engine_suffix, cfg$unit_repr, cfg$size_floor,
           if (permute) sprintf(", %d permutations", cfg$b_unit) else " (observed only, no permutations)")
       um <- ld_unit_matrix(s1$genotypes, s1$stage1, s1$map, size_floor = cfg$size_floor,
                            repr = cfg$unit_repr)
-      prep <- emmax_setup(um, GRM)
+      prep <- emmax_setup(um, GRM, covar = covar)
       p_obs <- emmax_fast(prep, y_test)
       p_perm <- if (permute) .emmax_perm_matrix(prep, d$phenotype, perm_fun, cfg$b_unit, cfg$cores,
-                                                covariate = d$covariate) else NULL
+                                                covariate = covariate_resid) else NULL
       p_obs_marker <- .marker_scan()$p_obs   ## display-only companion; see file header
       dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
       saveRDS(p_obs, file.path(out_dir, "p_obs.rds"))
@@ -185,15 +195,16 @@ run_stage_A <- function(dataset_dir, cfg = resolve_config(dataset_dir), force = 
     eligible <- unique(unlist(cl$members[nl >= simes_floor], use.names = FALSE))
     params <- list(grm_method = cfg$grm_method, b = cfg$b_simes, seed = cfg$seed,
                    simes_floor = simes_floor, n_eligible = length(eligible))
+    if (!is.null(d$covariate)) params$covariate_method <- cov_method
     if (force || stage_stale(out_dir, stage_inputs, params, label = "emmax_simes")) {
       say("    [emmax_simes] marker-level emmax_fast (observed, all %s markers); %d permutations restricted to %s markers (%.1f%%) in Stage-1 units clearing simes_floor = %d\n",
           format(ncol(s1$genotypes), big.mark = ","), cfg$b_simes, format(length(eligible), big.mark = ","),
           100 * length(eligible) / ncol(s1$genotypes), simes_floor)
       ms <- .marker_scan()
       p_obs <- ms$p_obs
-      prep_compact <- emmax_setup(s1$genotypes[, eligible, drop = FALSE], GRM)
+      prep_compact <- emmax_setup(s1$genotypes[, eligible, drop = FALSE], GRM, covar = covar)
       p_perm_compact <- .emmax_perm_matrix(prep_compact, d$phenotype, perm_fun, cfg$b_simes, cfg$cores,
-                                           covariate = d$covariate)
+                                           covariate = covariate_resid)
       rownames(p_perm_compact) <- eligible
       dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
       saveRDS(p_obs, file.path(out_dir, "p_obs.rds"))

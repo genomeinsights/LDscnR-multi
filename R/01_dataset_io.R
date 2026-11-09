@@ -58,11 +58,14 @@
 ##                                       when absent.
 ##   <dataset_dir>/input/covariate.rds       optional (Stage A): named vector,
 ##                                       individual -> structure covariate
-##                                       (e.g. lineage). When present, the
-##                                       phenotype is residualised on it
-##                                       (resid(lm(y ~ covariate))) before
-##                                       EMMAX, and every permuted surrogate is
-##                                       residualised the same way AFTER
+##                                       (e.g. lineage), treated as a factor.
+##                                       With covariate_method = "gls" (default)
+##                                       it is a fixed effect in every EMMAX
+##                                       scan, observed and permuted; with
+##                                       "residualise" the phenotype is
+##                                       residualised on it (resid(lm(y ~
+##                                       covariate))) before EMMAX, and every
+##                                       permuted surrogate the same way AFTER
 ##                                       perm_fun() -- the manuscript's 9sp
 ##                                       analysis (LDscnR-paper/module_9sp/R/
 ##                                       03_EMMAX.R, EMMAX_COVAR = "lineage").
@@ -137,7 +140,8 @@ read_dataset <- function(dataset_dir, need_phenotype = FALSE) {
 
 ## Residualise a phenotype on the optional structure covariate (input/
 ## covariate.rds), treated as a factor: resid(lm(y ~ covariate)). The identity
-## when there is no covariate. Applied to the observed phenotype AND to every
+## when there is no covariate. Used only with covariate_method = "residualise";
+## "gls" passes the covariate to emmax_setup(covar = ) instead. Applied to the observed phenotype AND to every
 ## permuted surrogate (after perm_fun()), so observed and null are the same
 ## covariate-adjusted quantity -- LDscnR-paper/module_9sp/R/03_EMMAX.R's
 ## eco_resid / perm_lineage().

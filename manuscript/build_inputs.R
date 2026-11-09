@@ -42,7 +42,10 @@ write_panel <- function(out_dir, b, group_col, covariate_col = NULL) {
     "structure_group <- readRDS(file.path(.dataset_dir, \"input\", \"structure_group.rds\"))",
     "perm_fun <- function(b, y) perm_within_groups(y, population, structure_group)"),
     file.path(in_dir, "perm_fun.R"))
-  writeLines(sprintf("cores <- %dL", as.integer(Sys.getenv("LDSCNR_CORES", "4"))),
+  ## The manuscript residualised the phenotype on its covariate (module_9sp
+  ## eco_resid), so its numbers are reproduced with covariate_method = "residualise".
+  writeLines(c(sprintf("cores <- %dL", as.integer(Sys.getenv("LDSCNR_CORES", "4"))),
+               if (!is.null(covariate_col)) "covariate_method <- \"residualise\""),
              file.path(in_dir, "config.R"))
   cat(sprintf("  wrote %s: %d individuals x %s markers\n", out_dir, nrow(GTs),
               format(ncol(GTs), big.mark = ",")))

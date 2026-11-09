@@ -46,6 +46,13 @@ DEFAULTS <- list(
   grm_method           = "GCTA",               # SNPRelate::snpgdsGRM method
   b_unit               = 1000L,                 # permutations for the "unit" arm (cheap)
   b_simes              = 200L,                  # permutations for the "simes" arm (rescans every marker)
+  ## How input/covariate.rds enters the scan. "gls" (LDscnR >= 0.9.3): fixed
+  ## effects in the EMMAX model, emmax_setup(covar = ), so each marker or unit
+  ## is tested conditional on the covariate with n - ncol(X) - 1 df.
+  ## "residualise": the phenotype is replaced by resid(lm(y ~ covariate)) and
+  ## the genotypes are left as they are -- the method behind the manuscript's
+  ## nine-spined numbers, kept so they can be reproduced exactly.
+  covariate_method     = "gls",
   ## Stage B: outlier test / permutation null / region rotation
   ## size_floor: NULL means "derive from this dataset's own marker count" --
   ## see resolve_config()'s DERIVED SIZE_FLOOR section below. Set to a number
