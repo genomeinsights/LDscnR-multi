@@ -80,9 +80,12 @@ LDSCNR_PIN <- list(
   ## outlier-scan (the branch this was first pinned to) was fast-forwarded
   ## into main and development has continued there since -- outlier-scan
   ## itself is now a stale ancestor, not a separate line.
-  branch  = "main",
-  sha     = "24776194ce36",       # tag v0.9.1, the version cited in the manuscript
-  src_sha = "1fba54bf2928d007"
+  ## The submitted manuscript used tag v0.9.1 (main, 24776194ce36,
+  ## src_sha 1fba54bf2928d007). This branch tracks LDscnR's release-0.9.3
+  ## branch, the version for the resubmission; move the pin with it.
+  branch  = "release-0.9.3",
+  sha     = "ce05906cdbc4",
+  src_sha = "c8d7ba2aaa493f89"
 )
 
 check_ldscnr <- function(stop_on_fail = !nzchar(Sys.getenv("LDSCNR_LAX"))) {

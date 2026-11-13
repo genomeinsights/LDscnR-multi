@@ -10,8 +10,10 @@ This repository is a set of R scripts, not a package. It needs LDscnR
 installed (see [LDscnR version](#ldscnr-version)) and sources the plain
 `R/*.R` files.
 
-LDscnR-multi version 0.9.1 matches LDscnR v0.9.1, the version used in the
-manuscript (see [How to cite](#how-to-cite)).
+LDscnR-multi version 0.9.3 matches LDscnR 0.9.3 (branch `release-0.9.3`),
+the version for the revised manuscript. The submitted manuscript used LDscnR
+v0.9.1, which the `main` branches of both repositories still match (see
+[How to cite](#how-to-cite)).
 
 On one core of an Apple M3 Pro laptop (36 GB memory, R 4.6.1), a complete run
 of `run_dataset()` took about 14 minutes for the full three-spined stickleback
@@ -84,7 +86,7 @@ have not been tested.
 
 | Package | Minimum version | Source |
 | --- | --- | --- |
-| LDscnR | 0.9.1 (GitHub tag `v0.9.1`) | GitHub |
+| LDscnR | 0.9.3 (GitHub branch `release-0.9.3`) | GitHub |
 | data.table | 1.18.2 | CRAN |
 | digest | 0.6.39 | CRAN |
 | ggplot2 | 4.0.3 | CRAN |
@@ -103,7 +105,7 @@ checkout.
 install.packages(c("remotes", "BiocManager", "data.table", "digest",
                    "ggplot2", "ggrepel", "patchwork", "igraph"))
 BiocManager::install(c("SNPRelate", "gdsfmt"))
-remotes::install_github("genomeinsights/LDscnR@v0.9.1")
+remotes::install_github("genomeinsights/LDscnR@release-0.9.3")
 ```
 
 Then download or clone this repository. LDscnR-multi itself is not installed.
@@ -539,7 +541,8 @@ letters and digits in the scheme name become `_`, for example
 
 ## LDscnR version
 
-`R/00_config.R` records the validated LDscnR GitHub commit (tag `v0.9.1`).
+`R/00_config.R` records the validated LDscnR GitHub commit (on branch
+`release-0.9.3`).
 `check_ldscnr()` checks the installed package's GitHub revision before a data
 set runs, and an older or non-GitHub installation stops the batch. If that
 happens, reinstall the revision from [Installation](#installation). A version

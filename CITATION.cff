@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: "If you use LDscnR-multi, please cite the LDscnR manuscript (preferred citation below, a bioRxiv preprint submitted to Molecular Ecology Resources) and the LDscnR R package."
 title: "LDscnR-multi: a batch workflow for LD-aware genome scans with LDscnR"
 type: software
-version: "0.9.1"
+version: "0.9.3"
 license: MIT
 repository-code: "https://github.com/genomeinsights/LDscnR-multi"
 authors:
@@ -22,7 +22,7 @@ keywords:
 references:
   - type: software
     title: "LDscnR"
-    version: "0.9.1"
+    version: "0.9.3"
     repository-code: "https://github.com/genomeinsights/LDscnR"
     authors:
       - family-names: Kemppainen
